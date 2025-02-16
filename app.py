@@ -15,7 +15,8 @@ app.secret_key = "supersecretkey"
 
 # Vytvoření základní struktury databáze
 columns = ["Název dokumentu", "Kategorie", "Datum vydání / aktualizace", "Odkaz na zdroj", "Shrnutí obsahu", "Soubor", "Klíčová slova", "Původní obsah"]
-legislativa_db = pd.DataFrame(columns=columns)
+urls = ["https://cuni.cz/UK-146.html", "https://ftvs.cuni.cz/FTVS-83.html"]
+legislativa_db = pd.concat([scrape_legislation(url) for url in urls], ignore_index=True)
 
 # Nastavení e-mailu
 EMAIL_ADDRESS = "tvuj.email@gmail.com"
