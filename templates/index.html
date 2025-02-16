@@ -3,36 +3,43 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Legislativa VŠ, UK, FTVS</title>
+    <title>Seznam předpisů</title>
 </head>
 <body>
-    <h1>Vyhledávání legislativy</h1>
-    <form method="POST" action="/search">
-        <input type="text" name="keyword" placeholder="Zadej klíčové slovo">
-        <button type="submit">Hledat</button>
-    </form>
+    <h1>Seznam předpisů</h1>
 
-    {% if results %}
-        <h2>Výsledky hledání:</h2>
-        <ul>
-            {% for result in results %}
-                <li>{{ result["Název dokumentu"] }} - 
-                    <a href="{{ result['Odkaz na zdroj'] }}" target="_blank">Zobrazit</a> | 
-                    <a href="/download/{{ loop.index0 }}">Stáhnout PDF</a>
-                </li>
+    {% with messages = get_flashed_messages() %}
+        {% if messages %}
+            <ul>
+                {% for message in messages %}
+                    <li><strong>{{ message }}</strong></li>
+                {% endfor %}
+            </ul>
+        {% endif %}
+    {% endwith %}
+
+    <table border="1">
+        <thead>
+            <tr>
+                <th>Název dokumentu</th>
+                <th>Kategorie</th>
+                <th>Datum aktualizace</th>
+                <th>Odkaz na soubor</th>
+                <th>Porovnat změny</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for doc in documents %}
+            <tr>
+                <td>{{ doc["Název dokumentu"] }}</td>
+                <td>{{ doc["Kategorie"] }}</td>
+                <td>{{ doc["Datum vydání / aktualizace"] }}</td>
+                <td><a href="{{ doc['Soubor'] }}" target="_blank">Stáhnout PDF</a></td>
+                <td><a href="{{ url_for('compare', doc_id=loop.index0) }}">Porovnat změny</a></td>
+            </tr>
             {% endfor %}
-        </ul>
-    {% endif %}
+        </tbody>
+    </table>
 
-    <h2>Export</h2>
-    <form method="POST" action="/export_filtered_excel">
-        <input type="hidden" name="keyword" value="{{ request.form.keyword }}">
-        <button type="submit">Export do Excelu</button>
-    </form>
-
-    <form method="POST" action="/export_filtered_pdf">
-        <input type="hidden" name="keyword" value="{{ request.form.keyword }}">
-        <button type="submit">Export do PDF</button>
-    </form>
 </body>
 </html>
