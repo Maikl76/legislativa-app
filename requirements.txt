@@ -3,6 +3,5 @@ pandas
 requests
 beautifulsoup4
 fpdf
-smtplib
 difflib
 
