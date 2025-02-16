@@ -15,8 +15,6 @@ app.secret_key = "supersecretkey"
 
 # Vytvoření základní struktury databáze
 columns = ["Název dokumentu", "Kategorie", "Datum vydání / aktualizace", "Odkaz na zdroj", "Shrnutí obsahu", "Soubor", "Klíčová slova", "Původní obsah"]
-urls = ["https://cuni.cz/UK-146.html", "https://ftvs.cuni.cz/FTVS-83.html"]
-legislativa_db = pd.concat([scrape_legislation(url) for url in urls], ignore_index=True)
 
 # Nastavení e-mailu
 EMAIL_ADDRESS = "tvuj.email@gmail.com"
@@ -53,6 +51,10 @@ def scrape_legislation(url):
         return pd.DataFrame(data, columns=columns)
     return pd.DataFrame(columns=columns)
 
+# Inicializace databáze při startu aplikace
+urls = ["https://cuni.cz/UK-146.html", "https://ftvs.cuni.cz/FTVS-83.html"]
+legislativa_db = pd.concat([scrape_legislation(url) for url in urls], ignore_index=True)
+
 # Funkce pro porovnání verzí dokumentů
 def compare_versions(old_text, new_text):
     diff = difflib.unified_diff(old_text.splitlines(), new_text.splitlines(), lineterm="")
@@ -61,7 +63,6 @@ def compare_versions(old_text, new_text):
 # Funkce pro automatickou kontrolu aktualizací
 def update_legislation():
     global legislativa_db
-    urls = ["https://cuni.cz/UK-146.html", "https://ftvs.cuni.cz/FTVS-83.html"]
     while True:
         print("Kontrola aktualizací předpisů...")
         new_data = pd.concat([scrape_legislation(url) for url in urls], ignore_index=True)
