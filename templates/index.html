@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Legislativa VŠ, UK, FTVS</title>
+</head>
+<body>
+    <h1>Vyhledávání legislativy</h1>
+    <form method="POST" action="/search">
+        <input type="text" name="keyword" placeholder="Zadej klíčové slovo">
+        <button type="submit">Hledat</button>
+    </form>
+
+    {% if results %}
+        <h2>Výsledky hledání:</h2>
+        <ul>
+            {% for result in results %}
+                <li>{{ result["Název dokumentu"] }} - 
+                    <a href="{{ result['Odkaz na zdroj'] }}" target="_blank">Zobrazit</a> | 
+                    <a href="/download/{{ loop.index0 }}">Stáhnout PDF</a>
+                </li>
+            {% endfor %}
+        </ul>
+    {% endif %}
+
+    <h2>Export</h2>
+    <form method="POST" action="/export_filtered_excel">
+        <input type="hidden" name="keyword" value="{{ request.form.keyword }}">
+        <button type="submit">Export do Excelu</button>
+    </form>
+
+    <form method="POST" action="/export_filtered_pdf">
+        <input type="hidden" name="keyword" value="{{ request.form.keyword }}">
+        <button type="submit">Export do PDF</button>
+    </form>
+</body>
+</html>
