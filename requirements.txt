@@ -1,5 +1,8 @@
 flask
 pandas
 requests
+beautifulsoup4
 fpdf
-gunicorn
+smtplib
+difflib
+
