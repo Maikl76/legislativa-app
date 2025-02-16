@@ -3,5 +3,3 @@ pandas
 requests
 beautifulsoup4
 fpdf
-difflib
-
