@@ -1,28 +1,73 @@
+<h2>Seznam legislativních dokumentů</h2>
+
+<!-- Tabulka s dokumenty -->
+<table border="1">
+    <tr>
+        {% for source in sources %}
+            <th>{{ source }}</th>
+        {% endfor %}
+    </tr>
+    <tr>
+        {% for source in sources %}
+            <td>
+                <ul>
+                    {% for document in documents %}
+                        {% if document["Odkaz na zdroj"] == source %}
+                            <li>
+                                <a href="{{ document['Soubor'] }}" target="_blank">{{ document["Název dokumentu"] }}</a>
+                                <span style="color: {% if document_status.get(document['Název dokumentu']) == 'Nový ✅' %}green{% elif document_status.get(document['Název dokumentu']) == 'Aktualizováno 🟡' %}orange{% else %}gray{% endif %};">
+                                    {{ document_status.get(document["Název dokumentu"], "Beze změny ⚪") }}
+                                </span>
+                            </li>
+                        {% endif %}
+                    {% endfor %}
+                </ul>
+            </td>
+        {% endfor %}
+    </tr>
+</table>
+
+<!-- Vyhledávání -->
 <h2>Vyhledávání v dokumentech</h2>
 <form id="searchForm">
     <input type="text" id="searchQuery" placeholder="Zadejte hledané slovo" required>
     <button type="submit">Hledat</button>
 </form>
 
+<!-- Výsledky hledání -->
 <div id="searchResults" style="border:1px solid #ccc; padding:10px; margin-top:20px; display:none;">
     <h3>Výsledky hledání:</h3>
     <ul id="resultsList"></ul>
 </div>
 
+<!-- JavaScript pro vyhledávání -->
 <script>
 document.getElementById("searchForm").addEventListener("submit", function(event) {
     event.preventDefault();
     let query = document.getElementById("searchQuery").value;
-    fetch("/search", { method: "POST", body: new URLSearchParams({ query: query }), headers: { "Content-Type": "application/x-www-form-urlencoded" } })
+    
+    fetch("/search", {
+        method: "POST",
+        body: new URLSearchParams({ query: query }),
+        headers: { "Content-Type": "application/x-www-form-urlencoded" }
+    })
     .then(response => response.json())
     .then(results => {
         let resultsList = document.getElementById("resultsList");
         resultsList.innerHTML = "";
-        results.forEach(result => {
-            let li = document.createElement("li");
-            li.innerHTML = `<b>${result.document}</b> (${result.source}): <br> "${result.text}"`;
-            resultsList.appendChild(li);
-        });
+
+        if (results.error) {
+            resultsList.innerHTML = `<li style="color:red;">${results.error}</li>`;
+        } else if (results.length === 0) {
+            resultsList.innerHTML = `<li style="color:gray;">Nenalezen žádný výsledek.</li>`;
+        } else {
+            results.forEach(result => {
+                let li = document.createElement("li");
+                li.innerHTML = `<b>${result.document}</b> (<a href="${result.source}" target="_blank">Zdroj</a>): <br> "${result.text}"`;
+                resultsList.appendChild(li);
+            });
+        }
+
         document.getElementById("searchResults").style.display = "block";
     });
 });
