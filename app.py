@@ -67,26 +67,12 @@ def scrape_legislation(url):
         return pd.DataFrame(data, columns=columns)
     return pd.DataFrame(columns=columns)
 
-def update_legislation():
-    global legislativa_db, document_status
+def load_initial_data():
+    global legislativa_db
     urls = load_sources()
-    new_data = pd.concat([scrape_legislation(url) for url in urls], ignore_index=True)
-    
-    for index, row in new_data.iterrows():
-        doc_name = row["Název dokumentu"]
-        new_text = row["Původní obsah"]
-        
-        if doc_name not in legislativa_db["Název dokumentu"].values:
-            document_status[doc_name] = "Nový ✅"
-        else:
-            old_text = legislativa_db.loc[legislativa_db["Název dokumentu"] == doc_name, "Původní obsah"].values[0]
-            if old_text != new_text:
-                document_status[doc_name] = "Aktualizováno 🟡"
-                save_version(doc_name, old_text)
-            else:
-                document_status[doc_name] = "Beze změny ⚪"
+    legislativa_db = pd.concat([scrape_legislation(url) for url in urls], ignore_index=True)
 
-    legislativa_db = new_data
+load_initial_data()
 
 @app.route('/')
 def index():
@@ -111,6 +97,4 @@ def search():
     return jsonify(results)
 
 if __name__ == '__main__':
-    thread = threading.Thread(target=update_legislation, daemon=True)
-    thread.start()
     app.run(debug=True)
