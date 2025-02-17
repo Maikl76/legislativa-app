@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 
 # Načtení environmentálních proměnných
 load_dotenv()
+print(f"🔹 Načtený API klíč: {OPENROUTER_API_KEY}")
 
 app = Flask(__name__)
 app.secret_key = "supersecretkey"
