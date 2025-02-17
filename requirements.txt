@@ -2,5 +2,6 @@ flask
 pandas
 requests
 beautifulsoup4
-fpdf
-gunicorn
+pymupdf
+yagmail
+python-dotenv
