@@ -1,57 +1,44 @@
-from flask import Flask, render_template, request, flash, jsonify
+from flask import Flask, render_template, request, send_file, flash
 import os
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
-import fitz  # PyMuPDF
+from fpdf import FPDF
 import threading
 import time
-import yagmail  # Bezpečné odesílání e-mailů
+import smtplib
+from email.mime.text import MIMEText
 import difflib
-from dotenv import load_dotenv
-
-# Načtení environmentálních proměnných
-load_dotenv()
+import fitz  # PyMuPDF for PDF text extraction
+from transformers import pipeline
 
 app = Flask(__name__)
 app.secret_key = "supersecretkey"
 
-# Cesty pro ukládání dat
-SOURCES_FILE = "sources.txt"
-HISTORY_DIR = "historie_pdfs"
-
-if not os.path.exists(HISTORY_DIR):
-    os.makedirs(HISTORY_DIR)
-
-# Načtení e-mailových údajů
-EMAIL_ADDRESS = os.getenv("EMAIL_ADDRESS")
-RECIPIENT_EMAIL = os.getenv("RECIPIENT_EMAIL")
-
-# Inicializace databáze
+# Vytvoření základní struktury databáze
 columns = ["Název dokumentu", "Kategorie", "Datum vydání / aktualizace", "Odkaz na zdroj", "Shrnutí obsahu", "Soubor", "Klíčová slova", "Původní obsah"]
-legislativa_db = pd.DataFrame(columns=columns)
-document_status = {}
 
-def load_sources():
-    if os.path.exists(SOURCES_FILE):
-        with open(SOURCES_FILE, "r", encoding="utf-8") as file:
-            return [line.strip() for line in file.readlines()]
-    return []
+# Nastavení e-mailu
+EMAIL_ADDRESS = "tvuj.email@gmail.com"
+EMAIL_PASSWORD = "tvé_heslo"
+RECIPIENT_EMAIL = "prijemce.email@gmail.com"
 
-def save_source(url):
-    with open(SOURCES_FILE, "a", encoding="utf-8") as file:
-        file.write(url + "\n")
-
-def extract_text_from_pdf(url):
+def send_email_update(message):
+    msg = MIMEText(message)
+    msg["Subject"] = "Aktualizace legislativních předpisů"
+    msg["From"] = EMAIL_ADDRESS
+    msg["To"] = RECIPIENT_EMAIL
+    
     try:
-        response = requests.get(url)
-        if response.status_code == 200:
-            pdf_document = fitz.open(stream=response.content, filetype="pdf")
-            return "\n".join([page.get_text("text") for page in pdf_document]).strip()
+        server = smtplib.SMTP_SSL("smtp.gmail.com", 465)
+        server.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
+        server.sendmail(EMAIL_ADDRESS, RECIPIENT_EMAIL, msg.as_string())
+        server.quit()
+        print("Email s aktualizacemi byl úspěšně odeslán.")
     except Exception as e:
-        print("Chyba při zpracování PDF:", e)
-    return ""
+        print("Chyba při odesílání e-mailu:", e)
 
+# Funkce pro stahování seznamu předpisů ze stránek UK a FTVS
 def scrape_legislation(url):
     response = requests.get(url)
     if response.status_code == 200:
@@ -61,40 +48,60 @@ def scrape_legislation(url):
             href = link["href"]
             if href.endswith(".pdf"):
                 name = link.text.strip()
-                full_url = href if href.startswith("http") else url[:url.rfind("/")+1] + href
-                text_content = extract_text_from_pdf(full_url)
-                data.append([name, "Legislativa", "N/A", url, "", full_url, "předpisy", text_content])
+                full_url = url[:url.rfind("/")+1] + href if href.startswith("/") else href
+                data.append([name, "UK/FTVS", "N/A", url, "", full_url, "předpisy, univerzita, UK/FTVS", ""])
         return pd.DataFrame(data, columns=columns)
     return pd.DataFrame(columns=columns)
 
-def load_initial_data():
-    global legislativa_db
-    urls = load_sources()
-    legislativa_db = pd.concat([scrape_legislation(url) for url in urls], ignore_index=True)
+# Funkce pro extrakci textu z PDF
+def extract_text_from_pdf(pdf_path):
+    text = ""
+    try:
+        with fitz.open(pdf_path) as doc:
+            for page in doc:
+                text += page.get_text("text") + "\n"
+    except Exception as e:
+        print(f"Chyba při extrakci textu z PDF {pdf_path}: {e}")
+    return text
 
-load_initial_data()
+# Inicializace databáze při startu aplikace
+urls = ["https://cuni.cz/UK-146.html", "https://ftvs.cuni.cz/FTVS-83.html"]
+legislativa_db = pd.concat([scrape_legislation(url) for url in urls], ignore_index=True)
+
+# Extrakce textu z uložených PDF dokumentů
+pdf_texts = {}
+for doc in legislativa_db["Soubor"]:
+    pdf_texts[doc] = extract_text_from_pdf(doc)
+
+# Inicializace jazykového modelu pro otázky a odpovědi
+qa_pipeline = pipeline("question-answering")
+
+def search_pdf_content(question):
+    results = []
+    for doc, content in pdf_texts.items():
+        if question.lower() in content.lower():
+            results.append((doc, content))
+    return results
+
+def generate_answer(question):
+    results = search_pdf_content(question)
+    if not results:
+        return "Odpověď nebyla nalezena v dostupných dokumentech."
+    
+    best_result = results[0][1]  # Nejrelevantnější nalezený text
+    answer = qa_pipeline(question=question, context=best_result)
+    
+    return answer["answer"]
 
 @app.route('/')
 def index():
-    sources = load_sources()
-    return render_template('index.html', documents=legislativa_db.to_dict(orient="records"), sources=sources, document_status=document_status)
+    return render_template('index.html', documents=legislativa_db.to_dict(orient="records"))
 
 @app.route('/search', methods=['POST'])
 def search():
-    query = request.form.get("query", "").strip().lower()
-    results = []
-
-    if not query:
-        return jsonify({"error": "Zadejte hledaný výraz!"})
-
-    for _, doc in legislativa_db.iterrows():
-        text = doc["Původní obsah"]
-        paragraphs = text.split("\n\n")
-        for paragraph in paragraphs:
-            if query in paragraph.lower():
-                results.append({"text": paragraph.strip(), "document": doc["Název dokumentu"], "source": doc["Odkaz na zdroj"]})
-
-    return jsonify(results)
+    question = request.form.get("question", "")
+    answer = generate_answer(question)
+    return render_template("index.html", documents=legislativa_db.to_dict(orient="records"), answer=answer)
 
 if __name__ == '__main__':
     app.run(debug=True)
