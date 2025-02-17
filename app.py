@@ -1,43 +1,64 @@
-from flask import Flask, render_template, request, send_file, flash
+from flask import Flask, render_template, request, flash
 import os
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
-from fpdf import FPDF
+import fitz  # PyMuPDF
 import threading
 import time
 import smtplib
-from email.mime.text import MIMEText
+import yagmail  # Bezpečné odesílání e-mailů
 import difflib
+from dotenv import load_dotenv
+
+# Načteme environment proměnné
+load_dotenv()
 
 app = Flask(__name__)
 app.secret_key = "supersecretkey"
 
-# Vytvoření základní struktury databáze
+# Cesty pro ukládání dat
+SOURCES_FILE = "sources.txt"
+HISTORY_DIR = "historie_pdfs"
+
+# Vytvoření složky pro historii PDF, pokud neexistuje
+if not os.path.exists(HISTORY_DIR):
+    os.makedirs(HISTORY_DIR)
+
+# Načtení e-mailových údajů
+EMAIL_ADDRESS = os.getenv("EMAIL_ADDRESS")
+RECIPIENT_EMAIL = os.getenv("RECIPIENT_EMAIL")
+
+# Inicializace databáze
 columns = ["Název dokumentu", "Kategorie", "Datum vydání / aktualizace", "Odkaz na zdroj", "Shrnutí obsahu", "Soubor", "Klíčová slova", "Původní obsah"]
+legislativa_db = pd.DataFrame(columns=columns)
 
-# Nastavení e-mailu
-EMAIL_ADDRESS = "tvuj.email@gmail.com"
-EMAIL_PASSWORD = "tvé_heslo"
-RECIPIENT_EMAIL = "prijemce.email@gmail.com"
 
-def send_email_update(message):
-    msg = MIMEText(message)
-    msg["Subject"] = "Aktualizace legislativních předpisů"
-    msg["From"] = EMAIL_ADDRESS
-    msg["To"] = RECIPIENT_EMAIL
-    
+def load_sources():
+    """ Načte seznam sledovaných URL. """
+    if os.path.exists(SOURCES_FILE):
+        with open(SOURCES_FILE, "r", encoding="utf-8") as file:
+            return [line.strip() for line in file.readlines()]
+    return []
+
+def save_source(url):
+    """ Přidá novou URL do souboru. """
+    with open(SOURCES_FILE, "a", encoding="utf-8") as file:
+        file.write(url + "\n")
+
+def extract_text_from_pdf(url):
+    """ Stáhne PDF a extrahuje text. """
     try:
-        server = smtplib.SMTP_SSL("smtp.gmail.com", 465)
-        server.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
-        server.sendmail(EMAIL_ADDRESS, RECIPIENT_EMAIL, msg.as_string())
-        server.quit()
-        print("Email s aktualizacemi byl úspěšně odeslán.")
+        response = requests.get(url)
+        if response.status_code == 200:
+            pdf_document = fitz.open(stream=response.content, filetype="pdf")
+            return "\n".join([page.get_text("text") for page in pdf_document]).strip()
     except Exception as e:
-        print("Chyba při odesílání e-mailu:", e)
+        print("Chyba při zpracování PDF:", e)
+    return ""
 
-# Funkce pro stahování seznamu předpisů ze stránek UK a FTVS
 def scrape_legislation(url):
+    """ Stáhne seznam PDF dokumentů z webové stránky. """
     response = requests.get(url)
     if response.status_code == 200:
         soup = BeautifulSoup(response.text, 'html.parser')
@@ -47,50 +68,63 @@ def scrape_legislation(url):
             if href.endswith(".pdf"):
                 name = link.text.strip()
                 full_url = url[:url.rfind("/")+1] + href if href.startswith("/") else href
-                data.append([name, "UK/FTVS", "N/A", url, "", full_url, "předpisy, univerzita, UK/FTVS", ""])
+                text_content = extract_text_from_pdf(full_url)
+                data.append([name, "Legislativa", "N/A", url, "", full_url, "předpisy", text_content])
         return pd.DataFrame(data, columns=columns)
     return pd.DataFrame(columns=columns)
 
-# Inicializace databáze při startu aplikace
-urls = ["https://cuni.cz/UK-146.html", "https://ftvs.cuni.cz/FTVS-83.html"]
-legislativa_db = pd.concat([scrape_legislation(url) for url in urls], ignore_index=True)
-
-# Funkce pro porovnání verzí dokumentů
 def compare_versions(old_text, new_text):
+    """ Porovnání dvou verzí dokumentu. """
     diff = difflib.unified_diff(old_text.splitlines(), new_text.splitlines(), lineterm="")
     return "\n".join(diff)
 
-# Funkce pro automatickou kontrolu aktualizací
-def update_legislation():
-    global legislativa_db
-    while True:
-        print("Kontrola aktualizací předpisů...")
-        new_data = pd.concat([scrape_legislation(url) for url in urls], ignore_index=True)
-        
-        if not new_data.equals(legislativa_db):
-            print("Byly nalezeny nové nebo aktualizované předpisy. Aktualizace databáze...")
-            message = "Byly nalezeny nové nebo změněné předpisy na stránkách UK a FTVS. Zkontrolujte je ve vaší aplikaci."
-            send_email_update(message)
-            flash("Byly nalezeny nové předpisy! Databáze byla aktualizována.", "info")
-            legislativa_db = new_data
-        time.sleep(86400)  # Kontrola jednou denně
+def save_version(document_name, text_content):
+    """ Uloží starou verzi dokumentu. """
+    timestamp = time.strftime("%Y%m%d-%H%M%S")
+    filename = f"{HISTORY_DIR}/{document_name.replace(' ', '_')}_{timestamp}.txt"
+    with open(filename, "w", encoding="utf-8") as file:
+        file.write(text_content)
 
-# Spuštění automatické kontroly v samostatném vlákně
-thread = threading.Thread(target=update_legislation, daemon=True)
-thread.start()
+def send_email_update(message):
+    """ Odeslání upozornění e-mailem. """
+    try:
+        yag = yagmail.SMTP(EMAIL_ADDRESS)
+        yag.send(to=RECIPIENT_EMAIL, subject="Aktualizace legislativních předpisů", contents=message)
+        print("Email s aktualizacemi byl odeslán.")
+    except Exception as e:
+        print("Chyba při odesílání e-mailu:", e)
 
 @app.route('/')
 def index():
-    return render_template('index.html', documents=legislativa_db.to_dict(orient="records"))
+    sources = load_sources()
+    return render_template('index.html', documents=legislativa_db.to_dict(orient="records"), sources=sources)
 
-@app.route('/compare/<int:doc_id>')
-def compare(doc_id):
-    if doc_id < len(legislativa_db):
-        old_content = legislativa_db.iloc[doc_id]["Původní obsah"]
-        new_content = "Nový obsah dokumentu zde"  # Zde by bylo nutné stáhnout a extrahovat obsah dokumentu
-        changes = compare_versions(old_content, new_content)
-        return render_template("compare.html", changes=changes, document=legislativa_db.iloc[doc_id])
-    return "Dokument nelze porovnat."
+@app.route('/add_source', methods=['POST'])
+def add_source():
+    new_url = request.form.get("new_url")
+    if new_url and new_url.startswith("http"):
+        save_source(new_url)
+        flash(f"Nový zdroj '{new_url}' byl přidán!", "success")
+    else:
+        flash("Neplatná URL adresa!", "danger")
+    return index()
+
+@app.route('/check_updates', methods=['POST'])
+def check_updates():
+    global legislativa_db
+    urls = load_sources()
+    new_data = pd.concat([scrape_legislation(url) for url in urls], ignore_index=True)
+
+    if not new_data.equals(legislativa_db):
+        flash("Byly nalezeny nové nebo aktualizované předpisy!", "success")
+        send_email_update("Byly nalezeny nové předpisy.")
+        legislativa_db = new_data
+    else:
+        flash("Žádné nové předpisy nebyly nalezeny.", "info")
+
+    return index()
 
 if __name__ == '__main__':
+    thread = threading.Thread(target=check_updates, daemon=True)
+    thread.start()
     app.run(debug=True)
