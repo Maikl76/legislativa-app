@@ -8,7 +8,14 @@ from dotenv import load_dotenv
 
 # Načtení environmentálních proměnných
 load_dotenv()
-print(f"🔹 Načtený API klíč: {OPENROUTER_API_KEY}")
+# Ověření, zda se klíč načetl správně
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+
+if not OPENROUTER_API_KEY:
+    print("❌ CHYBA: API klíč nebyl načten! Zkontroluj Render Environment Variables.")
+
+else:
+    print(f"✅ API klíč načten správně: {OPENROUTER_API_KEY[:5]}... (skrytý pro bezpečnost)")
 
 app = Flask(__name__)
 app.secret_key = "supersecretkey"
