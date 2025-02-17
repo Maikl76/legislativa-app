@@ -83,7 +83,7 @@ def ask_openrouter(question, context):
     headers = {"Authorization": f"Bearer {OPENROUTER_API_KEY}"}
 
     data = {
-        "model": "mistral/mistral-7b-instruct",
+        "model": "mistral/mistral-small-3",
         "messages": [
             {"role": "system", "content": "Jsi AI expert na legislativu. Odpovídej jasně a přesně."},
             {"role": "user", "content": f"Zde je kontext: {context}\n\nOtázka: {question}"}
