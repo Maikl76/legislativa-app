@@ -25,6 +25,14 @@ if not os.path.exists(HISTORY_DIR):
 # Inicializace databáze
 columns = ["Název dokumentu", "Kategorie", "Datum vydání / aktualizace", "Odkaz na zdroj", "Shrnutí obsahu", "Soubor", "Klíčová slova", "Původní obsah"]
 legislativa_db = pd.DataFrame(columns=columns)
+document_status = {}
+
+def load_sources():
+    """ Načte seznam sledovaných URL ze souboru sources.txt. """
+    if os.path.exists(SOURCES_FILE):
+        with open(SOURCES_FILE, "r", encoding="utf-8") as file:
+            return [line.strip() for line in file.readlines()]
+    return []
 
 def extract_text_from_pdf(url):
     """ Stáhne PDF a extrahuje text. """
@@ -53,6 +61,14 @@ def scrape_legislation(url):
         return pd.DataFrame(data, columns=columns)
     return pd.DataFrame(columns=columns)
 
+def load_initial_data():
+    """ Načte data při startu aplikace """
+    global legislativa_db
+    urls = load_sources()
+    legislativa_db = pd.concat([scrape_legislation(url) for url in urls], ignore_index=True)
+
+load_initial_data()  # 🆕 Načteme dokumenty při startu aplikace
+
 def ask_openrouter(question, context):
     """ Odesílá dotaz na OpenRouter API (zdarma AI odpovědi) """
     API_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -77,7 +93,24 @@ def ask_openrouter(question, context):
 @app.route('/')
 def index():
     sources = load_sources()
-    return render_template('index.html', documents=legislativa_db.to_dict(orient="records"), sources=sources)
+    return render_template('index.html', documents=legislativa_db.to_dict(orient="records"), sources=sources, document_status=document_status)
+
+@app.route('/search', methods=['POST'])
+def search():
+    query = request.form.get("query", "").strip().lower()
+    results = []
+
+    if not query:
+        return jsonify({"error": "Zadejte hledaný výraz!"})
+
+    for _, doc in legislativa_db.iterrows():
+        text = doc["Původní obsah"]
+        paragraphs = text.split("\n\n")
+        for paragraph in paragraphs:
+            if query in paragraph.lower():
+                results.append({"text": paragraph.strip(), "document": doc["Název dokumentu"], "source": doc["Odkaz na zdroj"]})
+
+    return jsonify(results)
 
 @app.route('/ask', methods=['POST'])
 def ask():
