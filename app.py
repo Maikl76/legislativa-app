@@ -10,7 +10,7 @@ import smtplib
 from email.mime.text import MIMEText
 import difflib
 import fitz  # PyMuPDF for PDF text extraction
-from transformers import pipeline
+from transformers import pipeline, AutoModelForQuestionAnswering, AutoTokenizer
 
 app = Flask(__name__)
 app.secret_key = "supersecretkey"
@@ -74,7 +74,10 @@ for doc in legislativa_db["Soubor"]:
     pdf_texts[doc] = extract_text_from_pdf(doc)
 
 # Inicializace jazykového modelu pro otázky a odpovědi
-qa_pipeline = pipeline("question-answering")
+model_name = "deepset/roberta-base-squad2"
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+model = AutoModelForQuestionAnswering.from_pretrained(model_name)
+qa_pipeline = pipeline("question-answering", model=model, tokenizer=tokenizer)
 
 def search_pdf_content(question):
     results = []
