@@ -6,3 +6,7 @@ pymupdf
 yagmail
 python-dotenv
 gunicorn
+fpdf
+transformers  # Jazykový model pro otázky a odpovědi
+torch  # Potřebné pro transformers
+sentencepiece  # Podpora modelů jako T5, BART
