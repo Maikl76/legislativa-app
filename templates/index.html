@@ -1,23 +1,29 @@
-<h2>Seznam legislativních předpisů</h2>
-
-<form action="/add_source" method="post">
-    <input type="text" name="new_url" placeholder="Vložte URL legislativy" required>
-    <button type="submit">Přidat zdroj</button>
+<h2>Vyhledávání v dokumentech</h2>
+<form id="searchForm">
+    <input type="text" id="searchQuery" placeholder="Zadejte hledané slovo" required>
+    <button type="submit">Hledat</button>
 </form>
 
-<form action="/check_updates" method="post">
-    <button type="submit">Zkontrolovat aktualizace</button>
-</form>
+<div id="searchResults" style="border:1px solid #ccc; padding:10px; margin-top:20px; display:none;">
+    <h3>Výsledky hledání:</h3>
+    <ul id="resultsList"></ul>
+</div>
 
-<table border="1">
-    <tr>
-        <th>Název</th>
-        <th>Odkaz</th>
-    </tr>
-    {% for document in documents %}
-    <tr>
-        <td>{{ document["Název dokumentu"] }}</td>
-        <td><a href="{{ document['Soubor'] }}" target="_blank">Otevřít</a></td>
-    </tr>
-    {% endfor %}
-</table>
+<script>
+document.getElementById("searchForm").addEventListener("submit", function(event) {
+    event.preventDefault();
+    let query = document.getElementById("searchQuery").value;
+    fetch("/search", { method: "POST", body: new URLSearchParams({ query: query }), headers: { "Content-Type": "application/x-www-form-urlencoded" } })
+    .then(response => response.json())
+    .then(results => {
+        let resultsList = document.getElementById("resultsList");
+        resultsList.innerHTML = "";
+        results.forEach(result => {
+            let li = document.createElement("li");
+            li.innerHTML = `<b>${result.document}</b> (${result.source}): <br> "${result.text}"`;
+            resultsList.appendChild(li);
+        });
+        document.getElementById("searchResults").style.display = "block";
+    });
+});
+</script>
