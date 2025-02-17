@@ -1,45 +1,23 @@
-<!DOCTYPE html>
-<html lang="cs">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Seznam předpisů</title>
-</head>
-<body>
-    <h1>Seznam předpisů</h1>
+<h2>Seznam legislativních předpisů</h2>
 
-    {% with messages = get_flashed_messages() %}
-        {% if messages %}
-            <ul>
-                {% for message in messages %}
-                    <li><strong>{{ message }}</strong></li>
-                {% endfor %}
-            </ul>
-        {% endif %}
-    {% endwith %}
+<form action="/add_source" method="post">
+    <input type="text" name="new_url" placeholder="Vložte URL legislativy" required>
+    <button type="submit">Přidat zdroj</button>
+</form>
 
-    <table border="1">
-        <thead>
-            <tr>
-                <th>Název dokumentu</th>
-                <th>Kategorie</th>
-                <th>Datum aktualizace</th>
-                <th>Odkaz na soubor</th>
-                <th>Porovnat změny</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for doc in documents %}
-            <tr>
-                <td>{{ doc["Název dokumentu"] }}</td>
-                <td>{{ doc["Kategorie"] }}</td>
-                <td>{{ doc["Datum vydání / aktualizace"] }}</td>
-                <td><a href="{{ doc['Soubor'] }}" target="_blank">Stáhnout PDF</a></td>
-                <td><a href="{{ url_for('compare', doc_id=loop.index0) }}">Porovnat změny</a></td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+<form action="/check_updates" method="post">
+    <button type="submit">Zkontrolovat aktualizace</button>
+</form>
 
-</body>
-</html>
+<table border="1">
+    <tr>
+        <th>Název</th>
+        <th>Odkaz</th>
+    </tr>
+    {% for document in documents %}
+    <tr>
+        <td>{{ document["Název dokumentu"] }}</td>
+        <td><a href="{{ document['Soubor'] }}" target="_blank">Otevřít</a></td>
+    </tr>
+    {% endfor %}
+</table>
