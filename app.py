@@ -71,7 +71,7 @@ def load_initial_data():
 load_initial_data()  # 🆕 Načteme dokumenty při startu aplikace
 
 def ask_openrouter(question, context):
-    """ Odesílá dotaz na OpenRouter API (s logováním chyb) """
+    """ Odesílá dotaz na OpenRouter API (s debug logem) """
     API_URL = "https://openrouter.ai/api/v1/chat/completions"
     headers = {"Authorization": f"Bearer {OPENROUTER_API_KEY}"}
 
@@ -84,12 +84,16 @@ def ask_openrouter(question, context):
         "max_tokens": 500
     }
 
+    print(f"🟡 ODESÍLÁM API REQUEST: {data}")  # 🛠 Debug log
+
     response = requests.post(API_URL, headers=headers, json=data)
 
     if response.status_code == 200:
+        print(f"🟢 API RESPONSE: {response.json()}")  # 🛠 Debug log
         return response.json()["choices"][0]["message"]["content"]
     else:
-        return "Omlouvám se, došlo k chybě při zpracování odpovědi."
+        print(f"🔴 CHYBA PŘI API POŽADAVKU ({response.status_code}): {response.text}")  # 🛠 Debug log
+        return f"Omlouvám se, došlo k chybě: {response.status_code}"
 
 @app.route('/')
 def index():
