@@ -70,12 +70,12 @@ def load_initial_data():
 load_initial_data()  # 🆕 Načteme dokumenty při startu aplikace
 
 def ask_openrouter(question, context):
-    """ Odesílá dotaz na OpenRouter API (zdarma AI odpovědi) """
+    """ Odesílá dotaz na OpenRouter API (s logováním chyb) """
     API_URL = "https://openrouter.ai/api/v1/chat/completions"
     headers = {"Authorization": f"Bearer {OPENROUTER_API_KEY}"}
 
     data = {
-        "model": "mistral/mistral-7b-instruct",  # 🆓 Zdarma model Mistral 7B
+        "model": "mistral/mistral-7b-instruct",
         "messages": [
             {"role": "system", "content": "Jsi AI expert na legislativu. Odpovídej jasně a přesně."},
             {"role": "user", "content": f"Zde je kontext: {context}\n\nOtázka: {question}"}
