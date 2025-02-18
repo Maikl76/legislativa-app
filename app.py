@@ -2,11 +2,14 @@ import requests
 import json
 import os
 import pandas as pd
+import psutil  # ✅ Přidáno pro sledování využití paměti
+import logging
 from flask import Flask, render_template, request, jsonify, redirect, url_for
 from bs4 import BeautifulSoup
 import fitz  # PyMuPDF
 from dotenv import load_dotenv
 import difflib  # Pro porovnání změn v dokumentech
+from functools import lru_cache  # ✅ Cache odpovědí AI
 
 # Načtení environmentálních proměnných
 load_dotenv()
@@ -14,6 +17,15 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
 app = Flask(__name__)
 app.secret_key = "supersecretkey"
+
+# ✅ Nastavení logování
+logging.basicConfig(level=logging.DEBUG, filename='app.log', filemode='a', format='%(asctime)s - %(levelname)s - %(message)s')
+
+# ✅ Funkce pro sledování využití paměti
+def get_memory_usage():
+    process = psutil.Process(os.getpid())
+    mem_info = process.memory_info()
+    return mem_info.rss / (1024 * 1024)  # Vrátí MB
 
 # Cesty pro soubory
 SOURCES_FILE = "sources.txt"
@@ -64,7 +76,7 @@ def extract_text_from_pdf(url):
             pdf_document = fitz.open(stream=response.content, filetype="pdf")
             return "\n".join([page.get_text("text") for page in pdf_document]).strip()
     except Exception as e:
-        print("Chyba při zpracování PDF:", e)
+        logging.error(f"Chyba při zpracování PDF: {e}")
     return ""
 
 # ✅ Stáhneme seznam právních předpisů z webu a kontrolujeme změny
@@ -100,26 +112,16 @@ def load_initial_data():
 
 load_initial_data()
 
-# ✅ API pro přidání nového webu
-@app.route('/add_source', methods=['POST'])
-def add_source():
-    new_url = request.form.get("url").strip()
-    if new_url:
-        with open(SOURCES_FILE, "a", encoding="utf-8") as file:
-            file.write(new_url + "\n")
-        new_data = scrape_legislation(new_url)
-        global legislativa_db
-        legislativa_db = pd.concat([legislativa_db, new_data], ignore_index=True)
-    return redirect(url_for('index'))
-
-# ✅ AI odpovídá na základě všech dostupných dokumentů (zpracovává je po blocích)
+# ✅ API pro AI odpovědi s využitím cache
+@lru_cache(maxsize=50)
 def ask_openrouter(question):
     API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
-    extracted_texts = " ".join(legislativa_db["Původní obsah"].tolist())
-    
-    # ✅ Rozdělíme text na bloky (každý max 3000 znaků)
-    chunks = [extracted_texts[i:i+3000] for i in range(0, len(extracted_texts), 3000)]
+    # ✅ Pouze posledních 5 dokumentů
+    extracted_texts = " ".join(legislativa_db["Původní obsah"].tolist()[-5:])  
+
+    # ✅ Rozdělíme text na menší bloky (max 1500 znaků)
+    chunks = [extracted_texts[i:i+1500] for i in range(0, len(extracted_texts), 1500)]
 
     HEADERS = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
@@ -129,7 +131,7 @@ def ask_openrouter(question):
     final_answer = ""
 
     for i, chunk in enumerate(chunks):
-        print(f"🟡 Posílám část {i+1}/{len(chunks)} AI...")
+        logging.debug(f"🟡 Posílám část {i+1}/{len(chunks)} AI. Paměť: {get_memory_usage()} MB")
 
         DATA = {
             "model": "mistralai/mistral-7b-instruct:free",
@@ -143,11 +145,9 @@ def ask_openrouter(question):
         try:
             response = requests.post(API_URL, headers=HEADERS, json=DATA, timeout=15)
             response.raise_for_status()
-            response_json = response.json()
-            final_answer += response_json["choices"][0]["message"]["content"] + "\n\n"
-        except requests.exceptions.Timeout:
-            final_answer += "⚠️ Omlouvám se, ale jedna část odpovědi trvala příliš dlouho.\n"
+            final_answer += response.json()["choices"][0]["message"]["content"] + "\n\n"
         except requests.exceptions.RequestException as e:
+            logging.error(f"⛔ Chyba při volání OpenRouter API: {e}")
             final_answer += f"⚠️ Chyba při zpracování jedné části: {e}\n"
 
     return final_answer.strip()
