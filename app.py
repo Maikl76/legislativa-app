@@ -82,8 +82,81 @@ def add_source():
     new_url = request.form.get("url").strip()
     if new_url:
         save_source(new_url)  # ✅ Uložíme URL do sources.txt
-        load_initial_data()  # ✅ Znovu načteme všechna data
+        new_data = scrape_legislation(new_url)  # ✅ Stáhneme jen novou stránku
+        global legislativa_db
+        legislativa_db = pd.concat([legislativa_db, new_data], ignore_index=True)  # ✅ Přidáme nové dokumenty
     return redirect(url_for('index'))
+
+# ✅ AI odpovídá na základě právních textů
+def ask_openrouter(question):
+    """ Odesílá dotaz na OpenRouter API s omezeným kontextem """
+    API_URL = "https://openrouter.ai/api/v1/chat/completions"
+
+    extracted_texts = " ".join(legislativa_db["Původní obsah"].tolist()[:1])  # Pouze 1 dokument
+    manual_texts = load_manual_legal_texts()
+    context = (extracted_texts + "\n\n" + manual_texts)[:5000]  # Omezíme délku na 5000 znaků
+
+    HEADERS = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    DATA = {
+        "model": "google/gemini-2.0-flash-exp:free",
+        "messages": [
+            {"role": "system", "content": "Jsi AI expert na legislativu. Odpovídej POUZE na základě dokumentů."},
+            {"role": "user", "content": f"Dokumenty: {context}\n\nOtázka: {question}"}
+        ],
+        "max_tokens": 500
+    }
+
+    print(f"🟡 Odesílám API request s dotazem: {question}")  # Debug log
+
+    response = requests.post(API_URL, headers=HEADERS, json=DATA)
+
+    if response.status_code == 200:
+        response_json = response.json()
+        answer = response_json["choices"][0]["message"]["content"]
+        print(f"🟢 AI Odpověď: {answer}")  # Debug log
+        return answer
+    else:
+        print(f"🔴 Chyba API {response.status_code}: {response.text}")  # Debug log
+        return f"Omlouvám se, došlo k chybě: {response.status_code} - {response.text}"
+
+# ✅ API endpoint pro AI asistenta
+@app.route('/ask', methods=['POST'])
+def ask():
+    question = request.form.get("question", "").strip()
+    if not question:
+        return jsonify({"error": "Zadejte otázku!"})
+
+    answer = ask_openrouter(question)
+    return jsonify({"answer": answer})
+
+# ✅ Vyhledávání v dokumentech
+@app.route('/search', methods=['POST'])
+def search():
+    query = request.form.get("query", "").strip().lower()
+    results = []
+
+    if not query:
+        return jsonify({"error": "Zadejte hledaný výraz!"})
+
+    print(f"🟡 Hledám výraz: {query}")  # Debug log
+
+    for _, doc in legislativa_db.iterrows():
+        text = doc["Původní obsah"]
+        paragraphs = text.split("\n\n")
+        for paragraph in paragraphs:
+            if query in paragraph.lower():
+                results.append({"text": paragraph.strip(), "document": doc["Název dokumentu"], "source": doc["Odkaz na zdroj"]})
+
+    if not results:
+        print("🔴 Žádné výsledky nenalezeny.")  # Debug log
+    else:
+        print(f"🟢 Nalezeno {len(results)} výsledků.")  # Debug log
+
+    return jsonify(results)
 
 # ✅ Hlavní webová stránka
 @app.route('/')
