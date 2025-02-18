@@ -12,7 +12,7 @@ import difflib
 
 # ✅ Načtení environmentálních proměnných
 load_dotenv()
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 app = Flask(__name__)
 app.secret_key = "supersecretkey"
@@ -91,13 +91,13 @@ def add_source():
         legislativa_db = pd.concat([legislativa_db, new_data], ignore_index=True)
     return redirect(url_for('index'))
 
-# ✅ AI odpovídá na základě dokumentů z konkrétního webu
-def ask_openrouter(question, source):
-    API_URL = "https://openrouter.ai/api/v1/chat/completions"
+# ✅ AI odpovídá na základě dokumentů z konkrétního webu pomocí Groq API
+def ask_groq(question, source):
+    API_URL = "https://api.groq.com/v1/chat/completions"
 
-    if not OPENROUTER_API_KEY:
-        logging.error("❌ Chybí API klíč pro OpenRouter!")
-        return "⚠️ OpenRouter API klíč není nastaven."
+    if not GROQ_API_KEY:
+        logging.error("❌ Chybí API klíč pro Groq!")
+        return "⚠️ Groq API klíč není nastaven."
 
     selected_docs = legislativa_db[legislativa_db["Odkaz na zdroj"] == source]
 
@@ -117,7 +117,7 @@ def ask_openrouter(question, source):
             logging.debug(f"🟡 Odesílám část {j+1}/{len(chunks)} AI... Paměť: {get_memory_usage()} MB")
 
             DATA = {
-                "model": "deepseek/deepseek-r1:free",
+                "model": "llama3-8b-8192",  # Nebo použij "gemma-7b-it"
                 "messages": [
                     {"role": "system", "content": "Jsi AI expert na legislativu."},
                     {"role": "user", "content": f"Dokumenty:\n{chunk}\n\nOtázka: {question}"}
@@ -126,22 +126,22 @@ def ask_openrouter(question, source):
             }
 
             try:
-                logging.debug(f"🔵 Odesílám požadavek na OpenRouter AI: {DATA}")
-                response = requests.post(API_URL, headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}"}, json=DATA, timeout=60)
+                logging.debug(f"🔵 Odesílám požadavek na Groq AI: {DATA}")
+                response = requests.post(API_URL, headers={"Authorization": f"Bearer {GROQ_API_KEY}"}, json=DATA, timeout=60)
                 response.raise_for_status()
                 response_json = response.json()
 
-                logging.debug(f"🟢 Celá odpověď OpenRouter API: {response_json}")
+                logging.debug(f"🟢 Celá odpověď Groq API: {response_json}")
 
                 if "choices" not in response_json or not response_json["choices"]:
-                    logging.error(f"❌ OpenRouter API nevrátilo žádnou odpověď. Odpověď: {response_json}")
-                    return f"⚠️ OpenRouter nevrátil odpověď. Detaily: {response_json}"
+                    logging.error(f"❌ Groq API nevrátilo žádnou odpověď. Odpověď: {response_json}")
+                    return f"⚠️ Groq nevrátil odpověď. Detaily: {response_json}"
 
                 final_answer += response_json["choices"][0]["message"]["content"] + "\n\n"
 
             except requests.exceptions.RequestException as e:
-                logging.error(f"⛔ Chyba při volání OpenRouter API: {e}")
-                return f"⚠️ Chyba při volání OpenRouter API: {e}"
+                logging.error(f"⛔ Chyba při volání Groq API: {e}")
+                return f"⚠️ Chyba při volání Groq API: {e}"
             except Exception as e:
                 logging.error(f"⛔ Neočekávaná chyba: {e}")
                 return f"⚠️ Neočekávaná chyba: {e}"
@@ -155,7 +155,7 @@ def ask():
     source = request.form.get("source", "").strip()
     if not question or not source:
         return jsonify({"error": "Zadejte otázku a vyberte zdroj!"})
-    return jsonify({"answer": ask_openrouter(question, source)})
+    return jsonify({"answer": ask_groq(question, source)})
 
 # ✅ Hlavní webová stránka
 @app.route('/')
@@ -163,6 +163,4 @@ def index():
     return render_template('index.html', documents=legislativa_db.to_dict(orient="records"), sources=load_sources())
 
 if __name__ == '__main__':
-    import os
-    PORT = int(os.getenv("PORT", 5000))
-    app.run(host="0.0.0.0", port=PORT, debug=True)
+    app.run(host="0.0.0.0", port=5000, debug=True)
