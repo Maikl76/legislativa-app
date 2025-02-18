@@ -117,7 +117,7 @@ def ask_openrouter(question, source):
             logging.debug(f"🟡 Odesílám část {j+1}/{len(chunks)} AI... Paměť: {get_memory_usage()} MB")
 
             DATA = {
-                "model": "mistralai/mistral-7b-instruct:free",
+                "model": "deepseek/deepseek-r1:free",
                 "messages": [
                     {"role": "system", "content": "Jsi AI expert na legislativu."},
                     {"role": "user", "content": f"Dokumenty:\n{chunk}\n\nOtázka: {question}"}
