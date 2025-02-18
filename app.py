@@ -17,7 +17,6 @@ app.secret_key = "supersecretkey"
 
 # Cesty pro soubory
 SOURCES_FILE = "sources.txt"
-LEGAL_TEXTS_FILE = "legal_texts.txt"
 HISTORY_DIR = "historie_pdfs"
 
 if not os.path.exists(HISTORY_DIR):
@@ -26,7 +25,7 @@ if not os.path.exists(HISTORY_DIR):
 # Inicializace databáze
 columns = ["Název dokumentu", "Kategorie", "Datum vydání / aktualizace", "Odkaz na zdroj", "Shrnutí obsahu", "Soubor", "Klíčová slova", "Původní obsah"]
 legislativa_db = pd.DataFrame(columns=columns)
-document_status = {}  # Slovník pro sledování změn dokumentů
+document_status = {}
 
 # ✅ Načteme seznam webových zdrojů
 def load_sources():
@@ -34,11 +33,6 @@ def load_sources():
         with open(SOURCES_FILE, "r", encoding="utf-8") as file:
             return [line.strip() for line in file.readlines()]
     return []
-
-# ✅ Přidáme novou stránku do sources.txt
-def save_source(url):
-    with open(SOURCES_FILE, "a", encoding="utf-8") as file:
-        file.write(url + "\n")
 
 # ✅ Uložíme původní verzi dokumentu
 def save_original_content(doc_name, content):
@@ -93,7 +87,7 @@ def scrape_legislation(url):
                 # ✅ Uložíme nový obsah do historie
                 save_original_content(name, new_text)
 
-                document_status[name] = status  # Uložíme status dokumentu
+                document_status[name] = status
                 data.append([name, "Legislativa", "N/A", url, "", full_url, "předpisy", new_text])
         return pd.DataFrame(data, columns=columns)
     return pd.DataFrame(columns=columns)
@@ -111,22 +105,19 @@ load_initial_data()
 def add_source():
     new_url = request.form.get("url").strip()
     if new_url:
-        save_source(new_url)
+        with open(SOURCES_FILE, "a", encoding="utf-8") as file:
+            file.write(new_url + "\n")
         new_data = scrape_legislation(new_url)
         global legislativa_db
         legislativa_db = pd.concat([legislativa_db, new_data], ignore_index=True)
     return redirect(url_for('index'))
 
-# ✅ AI odpovídá na základě právních textů
+# ✅ AI odpovídá na základě všech dostupných dokumentů
 def ask_openrouter(question):
-    """ Odesílá dotaz na OpenRouter API a hledá ve více dokumentech """
     API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
-    extracted_texts = " ".join(legislativa_db["Původní obsah"].tolist()[:5])  # Prvních 5 dokumentů
-    manual_texts = ""  # Možnost přidat ruční texty
-
-    # ✅ Omezíme délku vstupu na max. 10 000 znaků
-    context = (extracted_texts + "\n\n" + manual_texts)[:10000]
+    extracted_texts = " ".join(legislativa_db["Původní obsah"].tolist())  
+    context = extracted_texts[:10000]  # ✅ Omezení na 10 000 znaků
 
     HEADERS = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
@@ -136,27 +127,19 @@ def ask_openrouter(question):
     DATA = {
         "model": "deepseek/deepseek-r1:free",
         "messages": [
-            {"role": "system", "content": 
-                "Jsi AI expert na legislativu. Odpovídej POUZE na základě níže uvedených dokumentů. "
-                "Pokud odpověď není jasná, pokus se ji odvodit na základě poskytnutých informací. "
-                "Nepřidávej vymyšlené informace."},
+            {"role": "system", "content": "Jsi AI expert na legislativu. Odpovídej pouze na základě níže uvedených dokumentů."},
             {"role": "user", "content": f"Dokumenty:\n{context}\n\nOtázka: {question}"}
         ],
         "max_tokens": 750
     }
 
-    print(f"🟡 Odesílám API request s dotazem: {question}")
-
-    response = requests.post(API_URL, headers=HEADERS, json=DATA)
-
-    if response.status_code == 200:
+    try:
+        response = requests.post(API_URL, headers=HEADERS, json=DATA, timeout=20)
+        response.raise_for_status()
         response_json = response.json()
-        answer = response_json["choices"][0]["message"]["content"]
-        print(f"🟢 AI Odpověď: {answer}")
-        return answer
-    else:
-        print(f"🔴 Chyba API {response.status_code}: {response.text}")
-        return f"Omlouvám se, došlo k chybě: {response.status_code} - {response.text}"
+        return response_json["choices"][0]["message"]["content"]
+    except requests.exceptions.RequestException as e:
+        return f"Omlouvám se, došlo k chybě: {e}"
 
 # ✅ API pro AI asistenta
 @app.route('/ask', methods=['POST'])
@@ -164,15 +147,34 @@ def ask():
     question = request.form.get("question", "").strip()
     if not question:
         return jsonify({"error": "Zadejte otázku!"})
+    return jsonify({"answer": ask_openrouter(question)})
 
-    answer = ask_openrouter(question)
-    return jsonify({"answer": answer})
+# ✅ Vyhledávání ve všech dokumentech
+@app.route('/search', methods=['POST'])
+def search():
+    query = request.form.get("query", "").strip().lower()
+    results = []
+
+    if not query:
+        return jsonify({"error": "Zadejte hledaný výraz!"})
+
+    for _, doc in legislativa_db.iterrows():
+        for paragraph in doc["Původní obsah"].split("\n\n"):
+            if query in paragraph.lower():
+                results.append({
+                    "text": paragraph.strip(),
+                    "document": doc["Název dokumentu"],
+                    "source": doc["Odkaz na zdroj"]
+                })
+                if len(results) >= 20:
+                    break
+
+    return jsonify(results)
 
 # ✅ Hlavní webová stránka
 @app.route('/')
 def index():
-    sources = load_sources()
-    return render_template('index.html', documents=legislativa_db.to_dict(orient="records"), sources=sources, document_status=document_status)
+    return render_template('index.html', documents=legislativa_db.to_dict(orient="records"), sources=load_sources(), document_status=document_status)
 
 if __name__ == '__main__':
     app.run(debug=True)
