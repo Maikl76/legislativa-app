@@ -1,156 +1,169 @@
-import requests
-import json
-import os
-import pandas as pd
-import psutil
-import logging
-from flask import Flask, render_template, request, jsonify, redirect, url_for
-from bs4 import BeautifulSoup
-import fitz  # PyMuPDF
-from dotenv import load_dotenv
-import difflib
-from functools import lru_cache
-
-# ✅ Načtení environmentálních proměnných
-load_dotenv()
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-
-app = Flask(__name__)
-app.secret_key = "supersecretkey"
-
-# ✅ Nastavení logování do souboru
-logging.basicConfig(level=logging.DEBUG, filename='app.log', filemode='a', format='%(asctime)s - %(levelname)s - %(message)s')
-
-# ✅ Funkce pro sledování využití paměti
-def get_memory_usage():
-    process = psutil.Process(os.getpid())
-    mem_info = process.memory_info()
-    return mem_info.rss / (1024 * 1024)  # Vrátí využití paměti v MB
-
-# Cesty pro soubory
-SOURCES_FILE = "sources.txt"
-HISTORY_DIR = "historie_pdfs"
-
-if not os.path.exists(HISTORY_DIR):
-    os.makedirs(HISTORY_DIR)
-
-# Inicializace databáze
-columns = ["Název dokumentu", "Kategorie", "Datum vydání / aktualizace", "Odkaz na zdroj", "Shrnutí obsahu", "Soubor", "Klíčová slova", "Původní obsah"]
-legislativa_db = pd.DataFrame(columns=columns)
-document_status = {}
-
-# ✅ Načteme seznam webových zdrojů
-def load_sources():
-    if os.path.exists(SOURCES_FILE):
-        with open(SOURCES_FILE, "r", encoding="utf-8") as file:
-            return [line.strip() for line in file.readlines()]
-    return []
-
-# ✅ Stáhneme PDF dokument a extrahujeme text
-def extract_text_from_pdf(url):
-    try:
-        response = requests.get(url)
-        if response.status_code == 200:
-            pdf_document = fitz.open(stream=response.content, filetype="pdf")
-            return "\n".join([page.get_text("text") for page in pdf_document]).strip()
-    except Exception as e:
-        logging.error(f"Chyba při zpracování PDF: {e}")
-    return ""
-
-# ✅ Stáhneme seznam právních předpisů z webu
-def scrape_legislation(url):
-    response = requests.get(url)
-    if response.status_code == 200:
-        soup = BeautifulSoup(response.text, 'html.parser')
-        data = []
-        for link in soup.find_all("a", href=True):
-            href = link["href"]
-            if href.endswith(".pdf"):
-                name = link.text.strip()
-                full_url = href if href.startswith("http") else url[:url.rfind("/")+1] + href
-                new_text = extract_text_from_pdf(full_url)
-                data.append([name, "Legislativa", "N/A", url, "", full_url, "předpisy", new_text])
-        return pd.DataFrame(data, columns=columns)
-    return pd.DataFrame(columns=columns)
-
-# ✅ Načteme legislativní dokumenty
-def load_initial_data():
-    global legislativa_db
-    urls = load_sources()
-    legislativa_db = pd.concat([scrape_legislation(url) for url in urls], ignore_index=True)
-
-load_initial_data()
-
-# ✅ API pro přidání nového webu
-@app.route('/add_source', methods=['POST'])
-def add_source():
-    new_url = request.form.get("url").strip()
-    if new_url:
-        with open(SOURCES_FILE, "a", encoding="utf-8") as file:
-            file.write(new_url + "\n")
-        new_data = scrape_legislation(new_url)
-        global legislativa_db
-        legislativa_db = pd.concat([legislativa_db, new_data], ignore_index=True)
-    return redirect(url_for('index'))
-
-# ✅ AI odpovídá na základě posledních 5 dokumentů (zpracovává je po blocích)
-@lru_cache(maxsize=50)
-def ask_openrouter(question):
-    API_URL = "https://openrouter.ai/api/v1/chat/completions"
-
-    # ✅ Posíláme pouze posledních 5 dokumentů, aby aplikace nepadala
-    extracted_texts = " ".join(legislativa_db["Původní obsah"].tolist()[-5:])
-    chunks = [extracted_texts[i:i+1000] for i in range(0, len(extracted_texts), 1000)]  # Bloky po 1000 znacích
-
-    HEADERS = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "Content-Type": "application/json",
-    }
-
-    final_answer = ""
-
-    for i, chunk in enumerate(chunks):
-        logging.debug(f"🟡 Odesílám část {i+1}/{len(chunks)} AI... Paměť: {get_memory_usage()} MB, Délka chunku: {len(chunk)} znaků.")
-
-        DATA = {
-            "model": "mistralai/mistral-7b-instruct:free",
-            "messages": [
-                {"role": "system", "content": "Jsi AI expert na legislativu. Odpovídej pouze na základě níže uvedených dokumentů."},
-                {"role": "user", "content": f"Dokumenty:\n{chunk}\n\nOtázka: {question}"}
-            ],
-            "max_tokens": 500
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Legislativní Dokumenty</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
         }
+        .container {
+            display: flex;
+            justify-content: space-between;
+        }
+        .section {
+            width: 48%;
+            padding: 10px;
+            border: 1px solid #ccc;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+        input, button {
+            padding: 8px;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
 
-        try:
-            response = requests.post(API_URL, headers=HEADERS, json=DATA, timeout=20)
-            response.raise_for_status()
-            response_json = response.json()
-            logging.debug(f"🟢 Odpověď AI chunk {i+1}: {response_json}")
-            final_answer += response_json["choices"][0]["message"]["content"] + "\n\n"
-        except requests.exceptions.Timeout:
-            logging.error("⛔ Timeout při volání OpenRouter API.")
-            final_answer += "⚠️ Omlouvám se, ale jedna část odpovědi trvala příliš dlouho.\n"
-        except requests.exceptions.RequestException as e:
-            logging.error(f"⛔ Chyba při volání OpenRouter API: {e}")
-            final_answer += f"⚠️ Chyba při zpracování jedné části: {e}\n"
+    <h1>Legislativní Dokumenty</h1>
 
-    return final_answer.strip()
+    <!-- ✅ Formulář pro přidání nového legislativního zdroje -->
+    <h2>Přidat nový zdroj legislativy</h2>
+    <form action="/add_source" method="post">
+        <input type="text" name="url" placeholder="Vložte URL legislativní stránky" required>
+        <button type="submit">Přidat</button>
+    </form>
 
-# ✅ API pro AI asistenta
-@app.route('/ask', methods=['POST'])
-def ask():
-    question = request.form.get("question", "").strip()
-    if not question:
-        return jsonify({"error": "Zadejte otázku!"})
-    return jsonify({"answer": ask_openrouter(question)})
+    <!-- ✅ Tabulka s dokumenty -->
+    <h2>Seznam legislativních dokumentů</h2>
+    <table>
+        <tr>
+            {% for source in sources %}
+                <th>{{ source }}</th>
+            {% endfor %}
+        </tr>
+        <tr>
+            {% for source in sources %}
+                <td>
+                    <ul>
+                        {% for document in documents %}
+                            {% if document["Odkaz na zdroj"] == source %}
+                                <li>
+                                    <a href="{{ document['Soubor'] }}" target="_blank">{{ document["Název dokumentu"] }}</a>
+                                </li>
+                            {% endif %}
+                        {% endfor %}
+                    </ul>
+                </td>
+            {% endfor %}
+        </tr>
+    </table>
 
-# ✅ Hlavní webová stránka
-@app.route('/')
-def index():
-    return render_template('index.html', documents=legislativa_db.to_dict(orient="records"), sources=load_sources())
+    <!-- ✅ Hlavní kontejner rozdělený na dvě části -->
+    <div class="container">
+        <!-- 🔹 Levá část – AI dotaz -->
+        <div class="section">
+            <h2>Zeptejte se legislativní AI</h2>
+            <form id="askForm">
+                <select id="sourceSelect">
+                    <option value="">Vyberte zdroj</option>
+                    {% for source in sources %}
+                        <option value="{{ source }}">{{ source }}</option>
+                    {% endfor %}
+                </select>
+                <input type="text" id="askQuery" placeholder="Zadejte svůj dotaz" required>
+                <button type="submit">Zeptat se</button>
+            </form>
+            <div id="aiResponse" style="display:none;">
+                <h3>Odpověď AI:</h3>
+                <p id="aiAnswer"></p>
+            </div>
+        </div>
 
-# ✅ Nastavení správného portu pro Render
-PORT = int(os.getenv("PORT", 5000))
+        <!-- 🔹 Pravá část – Vyhledávání -->
+        <div class="section">
+            <h2>Vyhledávání v dokumentech</h2>
+            <form id="searchForm">
+                <input type="text" id="searchQuery" placeholder="Zadejte hledané slovo" required>
+                <button type="submit">Hledat</button>
+            </form>
+            <div id="searchResults" style="display:none;">
+                <h3>Výsledky hledání:</h3>
+                <ul id="resultsList"></ul>
+            </div>
+        </div>
+    </div>
 
-if __name__ == '__main__':
-    app.run(host="0.0.0.0", port=PORT, debug=True)
+    <!-- ✅ JavaScript pro vyhledávání a AI asistenta -->
+    <script>
+        // ✅ Vyhledávání v dokumentech
+        document.getElementById("searchForm").addEventListener("submit", function(event) {
+            event.preventDefault();
+            let query = document.getElementById("searchQuery").value;
+
+            fetch("/search", {
+                method: "POST",
+                body: new URLSearchParams({ query: query }),
+                headers: { "Content-Type": "application/x-www-form-urlencoded" }
+            })
+            .then(response => response.json())
+            .then(results => {
+                let resultsList = document.getElementById("resultsList");
+                resultsList.innerHTML = "";
+
+                if (results.error) {
+                    resultsList.innerHTML = `<li style="color:red;">${results.error}</li>`;
+                } else if (results.length === 0) {
+                    resultsList.innerHTML = `<li style="color:gray;">Nenalezen žádný výsledek.</li>`;
+                } else {
+                    results.forEach(result => {
+                        let li = document.createElement("li");
+                        li.innerHTML = `<b>${result.document}</b> (<a href="${result.source}" target="_blank">Zdroj</a>): <br> "${result.text}"`;
+                        resultsList.appendChild(li);
+                    });
+                }
+
+                document.getElementById("searchResults").style.display = "block";
+            });
+        });
+
+        // ✅ Odeslání dotazu na AI
+        document.getElementById("askForm").addEventListener("submit", function(event) {
+            event.preventDefault();
+            let query = document.getElementById("askQuery").value;
+            let source = document.getElementById("sourceSelect").value;
+
+            if (!source) {
+                alert("Vyberte zdroj!");
+                return;
+            }
+
+            fetch("/ask", {
+                method: "POST",
+                body: new URLSearchParams({ question: query, source: source }),
+                headers: { "Content-Type": "application/x-www-form-urlencoded" }
+            })
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById("aiAnswer").innerText = data.answer || "Nepodařilo se získat odpověď.";
+                document.getElementById("aiResponse").style.display = "block";
+            });
+        });
+    </script>
+
+</body>
+</html>
