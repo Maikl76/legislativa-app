@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: legislativa-app
+    runtime: python
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r requirements.txt
+      pip install groq
+    startCommand: python app.py
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false
