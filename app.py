@@ -112,34 +112,45 @@ def add_source():
         legislativa_db = pd.concat([legislativa_db, new_data], ignore_index=True)
     return redirect(url_for('index'))
 
-# ✅ AI odpovídá na základě všech dostupných dokumentů
+# ✅ AI odpovídá na základě všech dostupných dokumentů (zpracovává je po blocích)
 def ask_openrouter(question):
     API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
-    extracted_texts = " ".join(legislativa_db["Původní obsah"].tolist())  
-    context = extracted_texts[:10000]  # ✅ Omezení na 10 000 znaků
+    extracted_texts = " ".join(legislativa_db["Původní obsah"].tolist())
+    
+    # ✅ Rozdělíme text na bloky (každý max 3000 znaků)
+    chunks = [extracted_texts[i:i+3000] for i in range(0, len(extracted_texts), 3000)]
 
     HEADERS = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
         "Content-Type": "application/json",
     }
 
-    DATA = {
-        "model": "deepseek/deepseek-r1:free",
-        "messages": [
-            {"role": "system", "content": "Jsi AI expert na legislativu. Odpovídej pouze na základě níže uvedených dokumentů."},
-            {"role": "user", "content": f"Dokumenty:\n{context}\n\nOtázka: {question}"}
-        ],
-        "max_tokens": 750
-    }
+    final_answer = ""
 
-    try:
-        response = requests.post(API_URL, headers=HEADERS, json=DATA, timeout=20)
-        response.raise_for_status()
-        response_json = response.json()
-        return response_json["choices"][0]["message"]["content"]
-    except requests.exceptions.RequestException as e:
-        return f"Omlouvám se, došlo k chybě: {e}"
+    for i, chunk in enumerate(chunks):
+        print(f"🟡 Posílám část {i+1}/{len(chunks)} AI...")
+
+        DATA = {
+            "model": "deepseek/deepseek-r1:free",
+            "messages": [
+                {"role": "system", "content": "Jsi AI expert na legislativu. Odpovídej pouze na základě níže uvedených dokumentů."},
+                {"role": "user", "content": f"Dokumenty:\n{chunk}\n\nOtázka: {question}"}
+            ],
+            "max_tokens": 500
+        }
+
+        try:
+            response = requests.post(API_URL, headers=HEADERS, json=DATA, timeout=15)
+            response.raise_for_status()
+            response_json = response.json()
+            final_answer += response_json["choices"][0]["message"]["content"] + "\n\n"
+        except requests.exceptions.Timeout:
+            final_answer += "⚠️ Omlouvám se, ale jedna část odpovědi trvala příliš dlouho.\n"
+        except requests.exceptions.RequestException as e:
+            final_answer += f"⚠️ Chyba při zpracování jedné části: {e}\n"
+
+    return final_answer.strip()
 
 # ✅ API pro AI asistenta
 @app.route('/ask', methods=['POST'])
@@ -148,28 +159,6 @@ def ask():
     if not question:
         return jsonify({"error": "Zadejte otázku!"})
     return jsonify({"answer": ask_openrouter(question)})
-
-# ✅ Vyhledávání ve všech dokumentech
-@app.route('/search', methods=['POST'])
-def search():
-    query = request.form.get("query", "").strip().lower()
-    results = []
-
-    if not query:
-        return jsonify({"error": "Zadejte hledaný výraz!"})
-
-    for _, doc in legislativa_db.iterrows():
-        for paragraph in doc["Původní obsah"].split("\n\n"):
-            if query in paragraph.lower():
-                results.append({
-                    "text": paragraph.strip(),
-                    "document": doc["Název dokumentu"],
-                    "source": doc["Odkaz na zdroj"]
-                })
-                if len(results) >= 20:
-                    break
-
-    return jsonify(results)
 
 # ✅ Hlavní webová stránka
 @app.route('/')
