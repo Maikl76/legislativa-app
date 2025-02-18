@@ -91,7 +91,7 @@ def add_source():
         legislativa_db = pd.concat([legislativa_db, new_data], ignore_index=True)
     return redirect(url_for('index'))
 
-# ✅ AI odpovídá na základě dokumentů z konkrétního webu, postupně po 5 dokumentech
+# ✅ AI odpovídá na základě dokumentů z konkrétního webu, postupně po 3 dokumentech
 def ask_openrouter(question, source):
     API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
@@ -100,11 +100,11 @@ def ask_openrouter(question, source):
 
     final_answer = ""
 
-    for i in range(0, len(selected_docs), 5):  # ✅ Procházíme dokumenty po 5
-        batch = selected_docs.iloc[i:i+5]  # ✅ Vezmeme vždy 5 dokumentů
+    for i in range(0, len(selected_docs), 3):  # ✅ Procházíme dokumenty po 3
+        batch = selected_docs.iloc[i:i+3]  # ✅ Vezmeme vždy 3 dokumenty
         extracted_texts = " ".join(batch["Původní obsah"].tolist())
 
-        chunks = [extracted_texts[i:i+1000] for i in range(0, len(extracted_texts), 1000)]  # ✅ Rozdělujeme na bloky
+        chunks = [extracted_texts[i:i+750] for i in range(0, len(extracted_texts), 750)]  # ✅ Menší bloky po 750 znacích
 
         for j, chunk in enumerate(chunks):
             logging.debug(f"🟡 Odesílám část {j+1}/{len(chunks)} AI... Paměť: {get_memory_usage()} MB")
@@ -115,11 +115,11 @@ def ask_openrouter(question, source):
                     {"role": "system", "content": "Jsi AI expert na legislativu. Odpovídej pouze na základě níže uvedených dokumentů."},
                     {"role": "user", "content": f"Dokumenty:\n{chunk}\n\nOtázka: {question}"}
                 ],
-                "max_tokens": 500
+                "max_tokens": 400  # ✅ Omezíme odpověď na 400 tokenů
             }
 
             try:
-                response = requests.post(API_URL, headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}"}, json=DATA, timeout=20)
+                response = requests.post(API_URL, headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}"}, json=DATA, timeout=60)
                 response.raise_for_status()
                 response_json = response.json()
                 final_answer += response_json["choices"][0]["message"]["content"] + "\n\n"
