@@ -63,6 +63,11 @@
                             {% if document["Odkaz na zdroj"] == source %}
                                 <li>
                                     <a href="{{ document['Soubor'] }}" target="_blank">{{ document["Název dokumentu"] }}</a>
+                                    <span style="color: {% if document_status.get(document['Název dokumentu']) == 'Nový ✅' %}green
+                                                 {% elif document_status.get(document['Název dokumentu']) == 'Aktualizováno 🟡' %}orange
+                                                 {% else %}gray{% endif %};">
+                                        {{ document_status.get(document["Název dokumentu"], "Beze změny ⚪") }}
+                                    </span>
                                 </li>
                             {% endif %}
                         {% endfor %}
