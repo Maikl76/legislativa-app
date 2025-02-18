@@ -91,7 +91,7 @@ def add_source():
         legislativa_db = pd.concat([legislativa_db, new_data], ignore_index=True)
     return redirect(url_for('index'))
 
-# ✅ AI odpovídá na základě dokumentů z konkrétního webu, postupně po 3 dokumentech
+# ✅ AI odpovídá na základě dokumentů z konkrétního webu
 def ask_openrouter(question, source):
     API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
@@ -99,7 +99,6 @@ def ask_openrouter(question, source):
         logging.error("❌ Chybí API klíč pro OpenRouter!")
         return "⚠️ OpenRouter API klíč není nastaven."
 
-    # ✅ Filtrujeme pouze dokumenty z vybraného zdroje
     selected_docs = legislativa_db[legislativa_db["Odkaz na zdroj"] == source]
 
     if selected_docs.empty:
@@ -108,11 +107,11 @@ def ask_openrouter(question, source):
 
     final_answer = ""
 
-    for i in range(0, len(selected_docs), 3):  # ✅ Procházíme dokumenty po 3
+    for i in range(0, len(selected_docs), 3):
         batch = selected_docs.iloc[i:i+3]
         extracted_texts = " ".join(batch["Původní obsah"].tolist())
 
-        chunks = [extracted_texts[i:i+500] for i in range(0, len(extracted_texts), 500)]  # ✅ Bloky po 500 znacích
+        chunks = [extracted_texts[i:i+500] for i in range(0, len(extracted_texts), 500)]
 
         for j, chunk in enumerate(chunks):
             logging.debug(f"🟡 Odesílám část {j+1}/{len(chunks)} AI... Paměť: {get_memory_usage()} MB")
@@ -120,17 +119,26 @@ def ask_openrouter(question, source):
             DATA = {
                 "model": "mistralai/mistral-7b-instruct:free",
                 "messages": [
-                    {"role": "system", "content": "Jsi AI expert na legislativu. Odpovídej pouze na základě níže uvedených dokumentů."},
+                    {"role": "system", "content": "Jsi AI expert na legislativu."},
                     {"role": "user", "content": f"Dokumenty:\n{chunk}\n\nOtázka: {question}"}
                 ],
                 "max_tokens": 300
             }
 
             try:
+                logging.debug(f"🔵 Odesílám požadavek na OpenRouter AI: {DATA}")
                 response = requests.post(API_URL, headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}"}, json=DATA, timeout=60)
                 response.raise_for_status()
                 response_json = response.json()
+
+                logging.debug(f"🟢 Celá odpověď OpenRouter API: {response_json}")
+
+                if "choices" not in response_json or not response_json["choices"]:
+                    logging.error(f"❌ OpenRouter API nevrátilo žádnou odpověď. Odpověď: {response_json}")
+                    return f"⚠️ OpenRouter nevrátil odpověď. Detaily: {response_json}"
+
                 final_answer += response_json["choices"][0]["message"]["content"] + "\n\n"
+
             except requests.exceptions.RequestException as e:
                 logging.error(f"⛔ Chyba při volání OpenRouter API: {e}")
                 return f"⚠️ Chyba při volání OpenRouter API: {e}"
