@@ -83,7 +83,7 @@ def ask_openrouter(question, context):
     headers = {"Authorization": f"Bearer {OPENROUTER_API_KEY}"}
 
     data = {
-        "model": "mistralai/mistral-small-24b-instruct-2501:free",
+        "model": "google/gemini-2.0-flash-exp:free",
         "messages": [
             {"role": "system", "content": "Jsi AI expert na legislativu. Odpovídej jasně a přesně."},
             {"role": "user", "content": f"Zde je kontext: {context}\n\nOtázka: {question}"}
