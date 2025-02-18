@@ -132,7 +132,7 @@ def ask_openrouter(question):
         print(f"🟡 Posílám část {i+1}/{len(chunks)} AI...")
 
         DATA = {
-            "model": "deepseek/deepseek-r1:free",
+            "model": "mistralai/mistral-7b-instruct:free",
             "messages": [
                 {"role": "system", "content": "Jsi AI expert na legislativu. Odpovídej pouze na základě níže uvedených dokumentů."},
                 {"role": "user", "content": f"Dokumenty:\n{chunk}\n\nOtázka: {question}"}
