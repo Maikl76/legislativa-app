@@ -7,3 +7,4 @@ yagmail
 python-dotenv
 gunicorn
 fpdf
+psutil
