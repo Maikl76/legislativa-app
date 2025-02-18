@@ -35,6 +35,11 @@ def load_sources():
             return [line.strip() for line in file.readlines()]
     return []
 
+# ✅ Přidáme novou stránku do sources.txt
+def save_source(url):
+    with open(SOURCES_FILE, "a", encoding="utf-8") as file:
+        file.write(url + "\n")
+
 # ✅ Uložíme původní verzi dokumentu
 def save_original_content(doc_name, content):
     file_path = os.path.join(HISTORY_DIR, f"{doc_name}.txt")
@@ -100,6 +105,68 @@ def load_initial_data():
     legislativa_db = pd.concat([scrape_legislation(url) for url in urls], ignore_index=True)
 
 load_initial_data()
+
+# ✅ API pro přidání nového webu
+@app.route('/add_source', methods=['POST'])
+def add_source():
+    new_url = request.form.get("url").strip()
+    if new_url:
+        save_source(new_url)
+        new_data = scrape_legislation(new_url)
+        global legislativa_db
+        legislativa_db = pd.concat([legislativa_db, new_data], ignore_index=True)
+    return redirect(url_for('index'))
+
+# ✅ AI odpovídá na základě právních textů
+def ask_openrouter(question):
+    """ Odesílá dotaz na OpenRouter API a hledá ve více dokumentech """
+    API_URL = "https://openrouter.ai/api/v1/chat/completions"
+
+    extracted_texts = " ".join(legislativa_db["Původní obsah"].tolist()[:5])  # Prvních 5 dokumentů
+    manual_texts = ""  # Možnost přidat ruční texty
+
+    # ✅ Omezíme délku vstupu na max. 10 000 znaků
+    context = (extracted_texts + "\n\n" + manual_texts)[:10000]
+
+    HEADERS = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    DATA = {
+        "model": "deepseek/deepseek-r1:free",
+        "messages": [
+            {"role": "system", "content": 
+                "Jsi AI expert na legislativu. Odpovídej POUZE na základě níže uvedených dokumentů. "
+                "Pokud odpověď není jasná, pokus se ji odvodit na základě poskytnutých informací. "
+                "Nepřidávej vymyšlené informace."},
+            {"role": "user", "content": f"Dokumenty:\n{context}\n\nOtázka: {question}"}
+        ],
+        "max_tokens": 750
+    }
+
+    print(f"🟡 Odesílám API request s dotazem: {question}")
+
+    response = requests.post(API_URL, headers=HEADERS, json=DATA)
+
+    if response.status_code == 200:
+        response_json = response.json()
+        answer = response_json["choices"][0]["message"]["content"]
+        print(f"🟢 AI Odpověď: {answer}")
+        return answer
+    else:
+        print(f"🔴 Chyba API {response.status_code}: {response.text}")
+        return f"Omlouvám se, došlo k chybě: {response.status_code} - {response.text}"
+
+# ✅ API pro AI asistenta
+@app.route('/ask', methods=['POST'])
+def ask():
+    question = request.form.get("question", "").strip()
+    if not question:
+        return jsonify({"error": "Zadejte otázku!"})
+
+    answer = ask_openrouter(question)
+    return jsonify({"answer": answer})
 
 # ✅ Hlavní webová stránka
 @app.route('/')
