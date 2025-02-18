@@ -52,7 +52,7 @@ def extract_text_from_pdf(url):
             pdf_document = fitz.open(stream=response.content, filetype="pdf")
             return "\n".join([page.get_text("text") for page in pdf_document]).strip()
     except Exception as e:
-        logging.error(f"Chyba při zpracování PDF: {e}")
+        logging.error(f"❌ Chyba při zpracování PDF: {e}")
     return ""
 
 # ✅ Stáhneme seznam legislativních dokumentů z webu
@@ -95,16 +95,24 @@ def add_source():
 def ask_openrouter(question, source):
     API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
+    if not OPENROUTER_API_KEY:
+        logging.error("❌ Chybí API klíč pro OpenRouter!")
+        return "⚠️ OpenRouter API klíč není nastaven."
+
     # ✅ Filtrujeme pouze dokumenty z vybraného zdroje
     selected_docs = legislativa_db[legislativa_db["Odkaz na zdroj"] == source]
+
+    if selected_docs.empty:
+        logging.warning("⚠️ Nebyly nalezeny žádné dokumenty pro tento zdroj.")
+        return "⚠️ Nebyly nalezeny žádné dokumenty pro tento zdroj."
 
     final_answer = ""
 
     for i in range(0, len(selected_docs), 3):  # ✅ Procházíme dokumenty po 3
-        batch = selected_docs.iloc[i:i+3]  # ✅ Vezmeme vždy 3 dokumenty
+        batch = selected_docs.iloc[i:i+3]
         extracted_texts = " ".join(batch["Původní obsah"].tolist())
 
-        chunks = [extracted_texts[i:i+750] for i in range(0, len(extracted_texts), 750)]  # ✅ Menší bloky po 750 znacích
+        chunks = [extracted_texts[i:i+500] for i in range(0, len(extracted_texts), 500)]  # ✅ Bloky po 500 znacích
 
         for j, chunk in enumerate(chunks):
             logging.debug(f"🟡 Odesílám část {j+1}/{len(chunks)} AI... Paměť: {get_memory_usage()} MB")
@@ -115,7 +123,7 @@ def ask_openrouter(question, source):
                     {"role": "system", "content": "Jsi AI expert na legislativu. Odpovídej pouze na základě níže uvedených dokumentů."},
                     {"role": "user", "content": f"Dokumenty:\n{chunk}\n\nOtázka: {question}"}
                 ],
-                "max_tokens": 400  # ✅ Omezíme odpověď na 400 tokenů
+                "max_tokens": 300
             }
 
             try:
@@ -125,9 +133,12 @@ def ask_openrouter(question, source):
                 final_answer += response_json["choices"][0]["message"]["content"] + "\n\n"
             except requests.exceptions.RequestException as e:
                 logging.error(f"⛔ Chyba při volání OpenRouter API: {e}")
-                final_answer += f"⚠️ Chyba při zpracování: {e}\n"
+                return f"⚠️ Chyba při volání OpenRouter API: {e}"
+            except Exception as e:
+                logging.error(f"⛔ Neočekávaná chyba: {e}")
+                return f"⚠️ Neočekávaná chyba: {e}"
 
-    return final_answer.strip()
+    return final_answer.strip() if final_answer else "⚠️ AI nevrátila žádnou odpověď."
 
 # ✅ API pro AI asistenta
 @app.route('/ask', methods=['POST'])
