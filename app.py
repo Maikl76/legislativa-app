@@ -166,4 +166,10 @@ def index():
     return render_template('index.html', documents=legislativa_db.to_dict(orient="records"), sources=load_sources(), document_status=document_status)
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    import os
+
+PORT = int(os.getenv("PORT", 5000))  # Railway poskytuje PORT jako env proměnnou
+
+if __name__ == '__main__':
+    app.run(host="0.0.0.0", port=PORT, debug=True)
+
