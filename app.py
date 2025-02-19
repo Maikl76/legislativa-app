@@ -9,10 +9,14 @@ from bs4 import BeautifulSoup
 import fitz  # PyMuPDF
 from dotenv import load_dotenv
 import difflib
+from groq import Groq
 
 # ✅ Načtení environmentálních proměnných
 load_dotenv()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+
+# ✅ Inicializace Groq klienta
+client = Groq(api_key=GROQ_API_KEY)
 
 # ✅ Konfigurace Flask aplikace
 app = Flask(__name__)
@@ -20,12 +24,6 @@ app.secret_key = "supersecretkey"
 
 # ✅ Logování do souboru
 logging.basicConfig(level=logging.DEBUG, filename='app.log', filemode='a', format='%(asctime)s - %(levelname)s - %(message)s')
-
-# ✅ Funkce pro sledování využití paměti
-def get_memory_usage():
-    process = psutil.Process(os.getpid())
-    mem_info = process.memory_info()
-    return mem_info.rss / (1024 * 1024)  # Vrátí využití paměti v MB
 
 # ✅ Cesty pro soubory
 SOURCES_FILE = "sources.txt"
@@ -45,6 +43,12 @@ def load_sources():
         with open(SOURCES_FILE, "r", encoding="utf-8") as file:
             return [line.strip() for line in file.readlines()]
     return []
+
+# ✅ Uložení webových zdrojů
+def save_sources(sources):
+    with open(SOURCES_FILE, "w", encoding="utf-8") as file:
+        for source in sources:
+            file.write(source + "\n")
 
 # ✅ Extrahování textu z PDF
 def extract_text_from_pdf(url):
@@ -98,28 +102,31 @@ load_initial_data()
 def add_source():
     new_url = request.form.get("url").strip()
     if new_url:
-        with open(SOURCES_FILE, "a", encoding="utf-8") as file:
-            file.write(new_url + "\n")
-        new_data = scrape_legislation(new_url)
+        sources = load_sources()
+        if new_url not in sources:
+            sources.append(new_url)
+            save_sources(sources)
+            new_data = scrape_legislation(new_url)
+            global legislativa_db
+            legislativa_db = pd.concat([legislativa_db, new_data], ignore_index=True)
+    return redirect(url_for('index'))
+
+# ✅ Odstranění zdroje
+@app.route('/remove_source', methods=['POST'])
+def remove_source():
+    url_to_remove = request.form.get("url").strip()
+    sources = load_sources()
+    if url_to_remove in sources:
+        sources.remove(url_to_remove)
+        save_sources(sources)
         global legislativa_db
-        legislativa_db = pd.concat([legislativa_db, new_data], ignore_index=True)
+        legislativa_db = legislativa_db[legislativa_db["Odkaz na zdroj"] != url_to_remove]
     return redirect(url_for('index'))
 
 # ✅ AI odpovídá na základě dokumentů pomocí Groq API
 def ask_groq(question, source):
     logging.debug(f"🔍 Dotaz na AI: {question}")
     logging.debug(f"📂 Zdroj: {source}")
-
-    if not GROQ_API_KEY:
-        logging.error("❌ Chybí API klíč pro Groq!")
-        return "⚠️ Groq API klíč není nastaven."
-
-    API_URL = "https://api.groq.com/v1/chat/completions"
-
-    headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}",
-        "Content-Type": "application/json"
-    }
 
     selected_docs = legislativa_db[legislativa_db["Odkaz na zdroj"] == source]
 
@@ -129,24 +136,26 @@ def ask_groq(question, source):
 
     extracted_texts = " ".join(selected_docs["Původní obsah"].tolist())
 
-    data = {
-        "model": "llama3-8b-8192",
-        "messages": [
-            {"role": "system", "content": "Jsi AI expert na legislativu."},
-            {"role": "user", "content": f"Dokumenty:\n{extracted_texts[:3000]}\n\nOtázka: {question}"}
-        ],
-        "max_tokens": 512
-    }
-
     try:
-        response = requests.post(API_URL, headers=headers, json=data)
-        response_json = response.json()
+        # ✅ Odesíláme dotaz na Groq API
+        completion = client.chat.completions.create(
+            model="llama3-8b-8192",
+            messages=[
+                {"role": "system", "content": "Jsi AI expert na legislativu."},
+                {"role": "user", "content": f"Dokumenty:\n{extracted_texts[:3000]}\n\nOtázka: {question}"}
+            ],
+            temperature=1,
+            max_tokens=512,
+            top_p=1
+        )
 
-        if "choices" not in response_json:
-            logging.error(f"❌ Groq API nevrátilo žádnou odpověď: {response_json}")
-            return "⚠️ Groq nevrátil odpověď."
+        logging.debug(f"🟢 Odpověď Groq API: {completion}")
 
-        return response_json["choices"][0]["message"]["content"]
+        if not completion.choices:
+            logging.error("❌ Groq API nevrátilo žádnou odpověď!")
+            return "⚠️ Groq API nevrátilo žádnou odpověď."
+
+        return completion.choices[0].message.content
 
     except Exception as e:
         logging.error(f"⛔ Chyba při volání Groq API: {e}")
