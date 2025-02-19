@@ -1,5 +1,4 @@
 import requests
-import json
 import os
 import pandas as pd
 import psutil  
@@ -8,11 +7,14 @@ from flask import Flask, render_template, request, jsonify
 from bs4 import BeautifulSoup
 import fitz  # PyMuPDF
 from dotenv import load_dotenv
-import difflib  
+from groq import Groq
 
-# Načtení environmentálních proměnných
+# ✅ Načtení API klíče z .env souboru
 load_dotenv()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+
+# ✅ Inicializace Groq klienta
+client = Groq(api_key=GROQ_API_KEY)
 
 app = Flask(__name__)
 app.secret_key = "supersecretkey"
@@ -26,19 +28,19 @@ def get_memory_usage():
     mem_info = process.memory_info()
     return mem_info.rss / (1024 * 1024)  # Vrátí MB
 
-# Cesty pro soubory
+# ✅ Cesty pro soubory
 SOURCES_FILE = "sources.txt"
 HISTORY_DIR = "historie_pdfs"
 
 if not os.path.exists(HISTORY_DIR):
     os.makedirs(HISTORY_DIR)
 
-# Inicializace databáze
+# ✅ Inicializace databáze
 columns = ["Název dokumentu", "Kategorie", "Datum vydání / aktualizace", "Odkaz na zdroj", "Shrnutí obsahu", "Soubor", "Klíčová slova", "Původní obsah"]
 legislativa_db = pd.DataFrame(columns=columns)
 document_status = {}
 
-# ✅ Načteme seznam webových zdrojů
+# ✅ Načtení seznamu legislativních webových zdrojů
 def load_sources():
     if os.path.exists(SOURCES_FILE):
         with open(SOURCES_FILE, "r", encoding="utf-8") as file:
@@ -56,7 +58,7 @@ def extract_text_from_pdf(url):
         logging.error(f"Chyba při zpracování PDF: {e}")
     return ""
 
-# ✅ Stáhneme seznam právních předpisů z webu a kontrolujeme změny
+# ✅ Stáhneme seznam legislativních dokumentů z webu a kontrolujeme změny
 def scrape_legislation(url):
     response = requests.get(url)
     if response.status_code == 200:
@@ -81,41 +83,35 @@ def load_initial_data():
 
 load_initial_data()
 
-# ✅ Funkce pro komunikaci s Groq AI
+# ✅ Funkce pro komunikaci s Groq API (LLaMA 3.1-8B-Instant)
 def ask_groq(question):
-    API_URL = "https://api.groq.com/openai/v1/chat/completions"
-    HEADERS = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
-
-    # ✅ Pouze posledních 5 dokumentů
-    extracted_texts = " ".join(legislativa_db["Původní obsah"].tolist()[-5:])
-
-    # ✅ Zkrácení textu na 2000 slov (~2500 tokenů)
-    words = extracted_texts.split()
-    truncated_text = " ".join(words[-2000:]) if len(words) > 2000 else extracted_texts
-
-    PROMPT = f"Dokumenty:\n{truncated_text}\n\nOtázka: {question}\nOdpověď:"
-
-    DATA = {
-        "model": "mixtral-8x7b-32768",
-        "messages": [{"role": "user", "content": PROMPT}]
-    }
-
+    """ Posílá dotaz na Groq API s modelem LLaMA 3.1-8B-Instant bez omezení délky vstupního textu. """
     try:
-        response = requests.post(API_URL, headers=HEADERS, json=DATA, timeout=15)
-        response_json = response.json()
+        # ✅ Vezmeme celý text ze všech uložených dokumentů
+        extracted_texts = " ".join(legislativa_db["Původní obsah"].tolist())
 
-        if "choices" in response_json and len(response_json["choices"]) > 0:
-            return response_json["choices"][0]["message"]["content"]
-        elif "error" in response_json:
-            return f"❌ Chyba API: {response_json['error'].get('message', 'Neznámá chyba')}"
-        else:
-            return "❌ Chyba: Neočekávaný formát odpovědi od API."
+        # ✅ Sestavení promptu
+        prompt = f"Dokumenty:\n{extracted_texts}\n\nOtázka: {question}\nOdpověď:"
 
-    except requests.exceptions.RequestException as e:
+        # ✅ Odeslání dotazu do Groq API
+        completion = client.chat.completions.create(
+            model="llama-3.1-8b-instant",  # ✅ Nahrazeno Mistral → LLaMA
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7,  # Mírně kreativní odpovědi, ale stále přesné
+            max_tokens=4096,  # ✅ Zvýšení maximální délky odpovědi
+            top_p=1,
+            stream=False,  # ✅ Nepoužíváme streamování
+            stop=None
+        )
+
+        # ✅ Vrácení odpovědi AI
+        return completion.choices[0].message.content.strip()
+
+    except Exception as e:
         logging.error(f"⛔ Chyba při volání Groq API: {e}")
         return f"❌ Chyba při komunikaci s AI: {str(e)}"
 
-# ✅ API pro AI asistenta
+# ✅ API endpoint pro dotazy na AI
 @app.route('/ask', methods=['POST'])
 def ask():
     question = request.form.get("question", "").strip()
