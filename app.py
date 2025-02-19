@@ -2,18 +2,17 @@ import requests
 import json
 import os
 import pandas as pd
-import psutil  # ✅ Přidáno pro sledování využití paměti
+import psutil  
 import logging
-from flask import Flask, render_template, request, jsonify, redirect, url_for
+from flask import Flask, render_template, request, jsonify
 from bs4 import BeautifulSoup
 import fitz  # PyMuPDF
 from dotenv import load_dotenv
-import difflib  # Pro porovnání změn v dokumentech
-from functools import lru_cache  # ✅ Cache odpovědí AI
+import difflib  
 
 # Načtení environmentálních proměnných
 load_dotenv()
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 app = Flask(__name__)
 app.secret_key = "supersecretkey"
@@ -46,28 +45,6 @@ def load_sources():
             return [line.strip() for line in file.readlines()]
     return []
 
-# ✅ Uložíme původní verzi dokumentu
-def save_original_content(doc_name, content):
-    file_path = os.path.join(HISTORY_DIR, f"{doc_name}.txt")
-    with open(file_path, "w", encoding="utf-8") as file:
-        file.write(content)
-
-# ✅ Načteme původní verzi dokumentu, pokud existuje
-def load_original_content(doc_name):
-    file_path = os.path.join(HISTORY_DIR, f"{doc_name}.txt")
-    if os.path.exists(file_path):
-        with open(file_path, "r", encoding="utf-8") as file:
-            return file.read()
-    return ""
-
-# ✅ Porovnáme starý a nový text dokumentu
-def compare_versions(old_text, new_text):
-    if not old_text:
-        return "Nový ✅"
-    if old_text == new_text:
-        return "Beze změny ⚪"
-    return "Aktualizováno 🟡"
-
 # ✅ Stáhneme PDF dokument a extrahujeme text
 def extract_text_from_pdf(url):
     try:
@@ -91,15 +68,7 @@ def scrape_legislation(url):
                 name = link.text.strip()
                 full_url = href if href.startswith("http") else url[:url.rfind("/")+1] + href
                 new_text = extract_text_from_pdf(full_url)
-
-                # ✅ Načteme starý obsah a zjistíme změny
-                old_text = load_original_content(name)
-                status = compare_versions(old_text, new_text)
-
-                # ✅ Uložíme nový obsah do historie
-                save_original_content(name, new_text)
-
-                document_status[name] = status
+                document_status[name] = "Nový ✅"
                 data.append([name, "Legislativa", "N/A", url, "", full_url, "předpisy", new_text])
         return pd.DataFrame(data, columns=columns)
     return pd.DataFrame(columns=columns)
@@ -112,45 +81,39 @@ def load_initial_data():
 
 load_initial_data()
 
-# ✅ API pro AI odpovědi s využitím cache
-@lru_cache(maxsize=50)
-def ask_openrouter(question):
-    API_URL = "https://openrouter.ai/api/v1/chat/completions"
+# ✅ Funkce pro komunikaci s Groq AI
+def ask_groq(question):
+    API_URL = "https://api.groq.com/openai/v1/chat/completions"
+    HEADERS = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
 
     # ✅ Pouze posledních 5 dokumentů
-    extracted_texts = " ".join(legislativa_db["Původní obsah"].tolist()[-5:])  
+    extracted_texts = " ".join(legislativa_db["Původní obsah"].tolist()[-5:])
 
-    # ✅ Rozdělíme text na menší bloky (max 1500 znaků)
-    chunks = [extracted_texts[i:i+1500] for i in range(0, len(extracted_texts), 1500)]
+    # ✅ Zkrácení textu na 2000 slov (~2500 tokenů)
+    words = extracted_texts.split()
+    truncated_text = " ".join(words[-2000:]) if len(words) > 2000 else extracted_texts
 
-    HEADERS = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "Content-Type": "application/json",
+    PROMPT = f"Dokumenty:\n{truncated_text}\n\nOtázka: {question}\nOdpověď:"
+
+    DATA = {
+        "model": "mixtral-8x7b-32768",
+        "messages": [{"role": "user", "content": PROMPT}]
     }
 
-    final_answer = ""
+    try:
+        response = requests.post(API_URL, headers=HEADERS, json=DATA, timeout=15)
+        response_json = response.json()
 
-    for i, chunk in enumerate(chunks):
-        logging.debug(f"🟡 Posílám část {i+1}/{len(chunks)} AI. Paměť: {get_memory_usage()} MB")
+        if "choices" in response_json and len(response_json["choices"]) > 0:
+            return response_json["choices"][0]["message"]["content"]
+        elif "error" in response_json:
+            return f"❌ Chyba API: {response_json['error'].get('message', 'Neznámá chyba')}"
+        else:
+            return "❌ Chyba: Neočekávaný formát odpovědi od API."
 
-        DATA = {
-            "model": "mistralai/mistral-7b-instruct:free",
-            "messages": [
-                {"role": "system", "content": "Jsi AI expert na legislativu. Odpovídej pouze na základě níže uvedených dokumentů."},
-                {"role": "user", "content": f"Dokumenty:\n{chunk}\n\nOtázka: {question}"}
-            ],
-            "max_tokens": 500
-        }
-
-        try:
-            response = requests.post(API_URL, headers=HEADERS, json=DATA, timeout=15)
-            response.raise_for_status()
-            final_answer += response.json()["choices"][0]["message"]["content"] + "\n\n"
-        except requests.exceptions.RequestException as e:
-            logging.error(f"⛔ Chyba při volání OpenRouter API: {e}")
-            final_answer += f"⚠️ Chyba při zpracování jedné části: {e}\n"
-
-    return final_answer.strip()
+    except requests.exceptions.RequestException as e:
+        logging.error(f"⛔ Chyba při volání Groq API: {e}")
+        return f"❌ Chyba při komunikaci s AI: {str(e)}"
 
 # ✅ API pro AI asistenta
 @app.route('/ask', methods=['POST'])
@@ -158,7 +121,7 @@ def ask():
     question = request.form.get("question", "").strip()
     if not question:
         return jsonify({"error": "Zadejte otázku!"})
-    return jsonify({"answer": ask_openrouter(question)})
+    return jsonify({"answer": ask_groq(question)})
 
 # ✅ Hlavní webová stránka
 @app.route('/')
