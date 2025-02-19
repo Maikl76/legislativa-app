@@ -3,20 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Legislativní Dokumenty</title>
+    <title>Legislativa</title>
     <style>
         body {
             font-family: Arial, sans-serif;
             margin: 20px;
-        }
-        .container {
-            display: flex;
-            justify-content: space-between;
-        }
-        .section {
-            width: 48%;
-            padding: 10px;
-            border: 1px solid #ccc;
+            padding: 20px;
         }
         table {
             width: 100%;
@@ -31,86 +23,110 @@
         th {
             background-color: #f2f2f2;
         }
-        input, button {
-            padding: 8px;
-            margin-top: 10px;
+        .status {
+            font-weight: bold;
+        }
+        .new { color: green; }
+        .updated { color: orange; }
+        .unchanged { color: gray; }
+        #searchResults, #aiResults {
+            margin-top: 20px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            display: none;
+        }
+        .column-container {
+            display: flex;
+            gap: 20px;
+        }
+        .column {
+            flex: 1;
         }
     </style>
 </head>
 <body>
 
-    <h1>Legislativní Dokumenty</h1>
+    <h1>Seznam legislativních dokumentů</h1>
 
-    <!-- ✅ Formulář pro přidání nového legislativního zdroje -->
-    <h2>Přidat nový zdroj legislativy</h2>
+    <!-- Přidání nového zdroje -->
     <form action="/add_source" method="post">
-        <input type="text" name="url" placeholder="Vložte URL legislativní stránky" required>
-        <button type="submit">Přidat</button>
+        <input type="text" name="url" placeholder="Vložte URL stránky" required>
+        <button type="submit">Přidat zdroj</button>
     </form>
 
-    <!-- ✅ Tabulka s dokumenty -->
-    <h2>Seznam legislativních dokumentů</h2>
+    <!-- Tabulka dokumentů -->
     <table>
         <tr>
-            {% for source in sources %}
-                <th>{{ source }}</th>
-            {% endfor %}
+            <th>Název dokumentu</th>
+            <th>Zdroj</th>
+            <th>Odkaz</th>
+            <th>Status</th>
         </tr>
+        {% for document in documents %}
         <tr>
-            {% for source in sources %}
-                <td>
-                    <ul>
-                        {% for document in documents %}
-                            {% if document["Odkaz na zdroj"] == source %}
-                                <li>
-                                    <a href="{{ document['Soubor'] }}" target="_blank">{{ document["Název dokumentu"] }}</a>
-                                </li>
-                            {% endif %}
-                        {% endfor %}
-                    </ul>
-                </td>
-            {% endfor %}
+            <td>{{ document["Název dokumentu"] }}</td>
+            <td>{{ document["Odkaz na zdroj"] }}</td>
+            <td><a href="{{ document['Soubor'] }}" target="_blank">Otevřít</a></td>
+            <td class="status {% if document_status.get(document['Název dokumentu']) == 'Nový ✅' %}new{% elif document_status.get(document['Název dokumentu']) == 'Aktualizován 🟡' %}updated{% else %}unchanged{% endif %}">
+                {{ document_status.get(document["Název dokumentu"], "Beze změny ⚪") }}
+            </td>
         </tr>
+        {% endfor %}
     </table>
 
-    <!-- ✅ Hlavní kontejner rozdělený na dvě části -->
-    <div class="container">
-        <!-- 🔹 Levá část – AI dotaz -->
-        <div class="section">
-            <h2>Zeptejte se legislativní AI</h2>
-            <form id="askForm">
-                <select id="sourceSelect">
-                    <option value="">Vyberte zdroj</option>
+    <div class="column-container">
+        <!-- AI Asistent -->
+        <div class="column">
+            <h2>AI Asistent</h2>
+            <form id="aiForm">
+                <input type="text" id="aiQuestion" placeholder="Zadejte otázku pro AI" required>
+                <select id="aiSource">
                     {% for source in sources %}
                         <option value="{{ source }}">{{ source }}</option>
                     {% endfor %}
                 </select>
-                <input type="text" id="askQuery" placeholder="Zadejte svůj dotaz" required>
-                <button type="submit">Zeptat se</button>
+                <button type="submit">Zeptej se AI</button>
             </form>
-            <div id="aiResponse" style="display:none;">
+            <div id="aiResults">
                 <h3>Odpověď AI:</h3>
-                <p id="aiAnswer"></p>
+                <p id="aiResponse"></p>
             </div>
         </div>
 
-        <!-- 🔹 Pravá část – Vyhledávání -->
-        <div class="section">
+        <!-- Vyhledávač v dokumentech -->
+        <div class="column">
             <h2>Vyhledávání v dokumentech</h2>
             <form id="searchForm">
                 <input type="text" id="searchQuery" placeholder="Zadejte hledané slovo" required>
                 <button type="submit">Hledat</button>
             </form>
-            <div id="searchResults" style="display:none;">
+            <div id="searchResults">
                 <h3>Výsledky hledání:</h3>
                 <ul id="resultsList"></ul>
             </div>
         </div>
     </div>
 
-    <!-- ✅ JavaScript pro vyhledávání a AI asistenta -->
     <script>
-        // ✅ Vyhledávání v dokumentech
+        // AI Asistent
+        document.getElementById("aiForm").addEventListener("submit", function(event) {
+            event.preventDefault();
+            let question = document.getElementById("aiQuestion").value;
+            let source = document.getElementById("aiSource").value;
+
+            fetch("/ask", {
+                method: "POST",
+                body: new URLSearchParams({ question: question, source: source }),
+                headers: { "Content-Type": "application/x-www-form-urlencoded" }
+            })
+            .then(response => response.json())
+            .then(result => {
+                document.getElementById("aiResponse").innerText = result.answer || "Žádná odpověď.";
+                document.getElementById("aiResults").style.display = "block";
+            });
+        });
+
+        // Vyhledávač v dokumentech
         document.getElementById("searchForm").addEventListener("submit", function(event) {
             event.preventDefault();
             let query = document.getElementById("searchQuery").value;
@@ -138,29 +154,6 @@
                 }
 
                 document.getElementById("searchResults").style.display = "block";
-            });
-        });
-
-        // ✅ Odeslání dotazu na AI
-        document.getElementById("askForm").addEventListener("submit", function(event) {
-            event.preventDefault();
-            let query = document.getElementById("askQuery").value;
-            let source = document.getElementById("sourceSelect").value;
-
-            if (!source) {
-                alert("Vyberte zdroj!");
-                return;
-            }
-
-            fetch("/ask", {
-                method: "POST",
-                body: new URLSearchParams({ question: query, source: source }),
-                headers: { "Content-Type": "application/x-www-form-urlencoded" }
-            })
-            .then(response => response.json())
-            .then(data => {
-                document.getElementById("aiAnswer").innerText = data.answer || "Nepodařilo se získat odpověď.";
-                document.getElementById("aiResponse").style.display = "block";
             });
         });
     </script>
