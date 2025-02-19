@@ -18,7 +18,7 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 app = Flask(__name__)
 app.secret_key = "supersecretkey"
 
-# ✅ Nastavení logování (aby se všechny chyby uložily do Render logů)
+# ✅ Logování do souboru
 logging.basicConfig(level=logging.DEBUG, filename='app.log', filemode='a', format='%(asctime)s - %(levelname)s - %(message)s')
 
 # ✅ Funkce pro sledování využití paměti
@@ -34,18 +34,19 @@ HISTORY_DIR = "historie_pdfs"
 if not os.path.exists(HISTORY_DIR):
     os.makedirs(HISTORY_DIR)
 
-# ✅ Inicializace databáze
-columns = ["Název dokumentu", "Kategorie", "Datum vydání / aktualizace", "Odkaz na zdroj", "Shrnutí obsahu", "Soubor", "Klíčová slova", "Původní obsah"]
+# ✅ Databáze dokumentů
+columns = ["Název dokumentu", "Kategorie", "Datum vydání", "Odkaz na zdroj", "Soubor", "Klíčová slova", "Původní obsah", "Status"]
 legislativa_db = pd.DataFrame(columns=columns)
+document_status = {}
 
-# ✅ Načtení seznamu webových zdrojů
+# ✅ Načtení webových zdrojů
 def load_sources():
     if os.path.exists(SOURCES_FILE):
         with open(SOURCES_FILE, "r", encoding="utf-8") as file:
             return [line.strip() for line in file.readlines()]
     return []
 
-# ✅ Stáhneme PDF dokument a extrahujeme text
+# ✅ Extrahování textu z PDF
 def extract_text_from_pdf(url):
     try:
         response = requests.get(url)
@@ -56,7 +57,7 @@ def extract_text_from_pdf(url):
         logging.error(f"❌ Chyba při zpracování PDF: {e}")
     return ""
 
-# ✅ Stáhneme seznam legislativních dokumentů z webu
+# ✅ Stažení dokumentů a kontrola změn
 def scrape_legislation(url):
     response = requests.get(url)
     if response.status_code == 200:
@@ -67,12 +68,24 @@ def scrape_legislation(url):
             if href.endswith(".pdf"):
                 name = link.text.strip()
                 full_url = href if href.startswith("http") else url[:url.rfind("/")+1] + href
-                text_content = extract_text_from_pdf(full_url)
-                data.append([name, "Legislativa", "N/A", url, "", full_url, "předpisy", text_content])
+                new_content = extract_text_from_pdf(full_url)
+
+                # Kontrola změn dokumentů
+                status = "Nový ✅"
+                if name in document_status:
+                    old_content = document_status[name]
+                    if old_content != new_content:
+                        status = "Aktualizován 🟡"
+                    else:
+                        status = "Beze změny ⚪"
+                document_status[name] = new_content
+
+                data.append([name, "Legislativa", "N/A", url, full_url, "předpisy", new_content, status])
+
         return pd.DataFrame(data, columns=columns)
     return pd.DataFrame(columns=columns)
 
-# ✅ Načteme legislativní dokumenty
+# ✅ Načtení dokumentů
 def load_initial_data():
     global legislativa_db
     urls = load_sources()
@@ -80,7 +93,7 @@ def load_initial_data():
 
 load_initial_data()
 
-# ✅ Přidání nového legislativního zdroje
+# ✅ Přidání nového zdroje
 @app.route('/add_source', methods=['POST'])
 def add_source():
     new_url = request.form.get("url").strip()
@@ -92,7 +105,7 @@ def add_source():
         legislativa_db = pd.concat([legislativa_db, new_data], ignore_index=True)
     return redirect(url_for('index'))
 
-# ✅ AI odpovídá na základě dokumentů z konkrétního webu pomocí Groq API
+# ✅ AI odpovídá na základě dokumentů pomocí Groq API
 def ask_groq(question, source):
     logging.debug(f"🔍 Dotaz na AI: {question}")
     logging.debug(f"📂 Zdroj: {source}")
@@ -125,13 +138,8 @@ def ask_groq(question, source):
         "max_tokens": 512
     }
 
-    logging.debug(f"📡 Odesílám požadavek na Groq API: {json.dumps(data, indent=2)}")
-
     try:
         response = requests.post(API_URL, headers=headers, json=data)
-        logging.debug(f"🔵 Status Code: {response.status_code}")
-        logging.debug(f"🟢 Odpověď Groq API: {response.json()}")
-
         response_json = response.json()
 
         if "choices" not in response_json:
@@ -156,7 +164,7 @@ def ask():
 # ✅ Hlavní webová stránka
 @app.route('/')
 def index():
-    return render_template('index.html', documents=legislativa_db.to_dict(orient="records"), sources=load_sources())
+    return render_template('index.html', documents=legislativa_db.to_dict(orient="records"), sources=load_sources(), document_status=document_status)
 
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=5000, debug=True)
