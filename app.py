@@ -9,11 +9,11 @@ import fitz  # PyMuPDF
 from dotenv import load_dotenv
 from groq import Groq
 
-# ✅ Načtení API klíče z .env souboru
+# ✅ Načtení API klíče
 load_dotenv()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
-# ✅ Inicializace Groq klienta
+# ✅ Inicializace klienta Groq
 client = Groq(api_key=GROQ_API_KEY)
 
 app = Flask(__name__)
@@ -21,12 +21,6 @@ app.secret_key = "supersecretkey"
 
 # ✅ Nastavení logování
 logging.basicConfig(level=logging.DEBUG, filename='app.log', filemode='a', format='%(asctime)s - %(levelname)s - %(message)s')
-
-# ✅ Funkce pro sledování využití paměti
-def get_memory_usage():
-    process = psutil.Process(os.getpid())
-    mem_info = process.memory_info()
-    return mem_info.rss / (1024 * 1024)  # Vrátí MB
 
 # ✅ Cesty pro soubory
 SOURCES_FILE = "sources.txt"
@@ -40,7 +34,7 @@ columns = ["Název dokumentu", "Kategorie", "Datum vydání / aktualizace", "Odk
 legislativa_db = pd.DataFrame(columns=columns)
 document_status = {}
 
-# ✅ Načtení seznamu legislativních webových zdrojů
+# ✅ Načteme seznam webových zdrojů
 def load_sources():
     if os.path.exists(SOURCES_FILE):
         with open(SOURCES_FILE, "r", encoding="utf-8") as file:
@@ -58,7 +52,7 @@ def extract_text_from_pdf(url):
         logging.error(f"Chyba při zpracování PDF: {e}")
     return ""
 
-# ✅ Stáhneme seznam legislativních dokumentů z webu a kontrolujeme změny
+# ✅ Stáhneme seznam legislativních dokumentů
 def scrape_legislation(url):
     response = requests.get(url)
     if response.status_code == 200:
@@ -83,24 +77,31 @@ def load_initial_data():
 
 load_initial_data()
 
-# ✅ Funkce pro komunikaci s Groq API (LLaMA 3.1-8B-Instant)
+# ✅ Funkce pro komunikaci s DeepSeek R1 Distill Qwen-32B
 def ask_groq(question):
-    """ Posílá dotaz na Groq API s modelem LLaMA 3.1-8B-Instant bez omezení délky vstupního textu. """
+    """ Posílá dotaz na Groq API s modelem DeepSeek R1 Distill Qwen-32B. """
     try:
-        # ✅ Vezmeme celý text ze všech uložených dokumentů
-        extracted_texts = " ".join(legislativa_db["Původní obsah"].tolist())
+        # ✅ Použijeme celý text posledních 5 dokumentů
+        extracted_texts = " ".join(legislativa_db["Původní obsah"].tolist()[-5:])
+
+        # ✅ Omezíme vstupní text na max. 25 000 tokenů (pokud model zvládne)
+        words = extracted_texts.split()
+        if len(words) > 25000:
+            truncated_text = " ".join(words[:12500]) + "\n...\n" + " ".join(words[-12500:])
+        else:
+            truncated_text = extracted_texts
 
         # ✅ Sestavení promptu
-        prompt = f"Dokumenty:\n{extracted_texts}\n\nOtázka: {question}\nOdpověď:"
+        prompt = f"Dokumenty:\n{truncated_text}\n\nOtázka: {question}\nOdpověď:"
 
         # ✅ Odeslání dotazu do Groq API
         completion = client.chat.completions.create(
-            model="llama-3.1-8b-instant",  # ✅ Nahrazeno Mistral → LLaMA
+            model="deepseek-r1-distill-qwen-32b",
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.7,  # Mírně kreativní odpovědi, ale stále přesné
-            max_tokens=4096,  # ✅ Zvýšení maximální délky odpovědi
-            top_p=1,
-            stream=False,  # ✅ Nepoužíváme streamování
+            temperature=0.6,
+            max_tokens=4096,  # ✅ Dlouhé odpovědi
+            top_p=0.95,
+            stream=False,
             stop=None
         )
 
