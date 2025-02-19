@@ -1,7 +1,6 @@
 import requests
 import os
 import pandas as pd
-import psutil  
 import logging
 from flask import Flask, render_template, request, jsonify
 from bs4 import BeautifulSoup
@@ -88,16 +87,16 @@ def get_documents():
     
     return jsonify({"documents": filtered_docs})
 
-# ✅ Funkce pro komunikaci s DeepSeek R1 Distill Qwen-32B (rozdělení textu na části)
+# ✅ Funkce pro komunikaci s AI (rozdělení textu na části)
 def ask_groq(question, documents):
-    """ Posílá dotaz na Groq API po částech, aby nepřekročil 6000 tokenů. """
+    """ Posílá dotaz na Groq API po částech, aby nepřekročil 5000 tokenů. """
     try:
         # ✅ Spojíme texty vybraných dokumentů
         full_text = " ".join([doc["Původní obsah"] for doc in documents])
 
-        # ✅ Rozdělíme text na části (max. 6000 tokenů)
+        # ✅ Rozdělíme text na menší části (max. 5000 tokenů)
         words = full_text.split()
-        chunk_size = 6000  # Maximální počet tokenů
+        chunk_size = 5000  # Ještě nižší limit pro bezpečnost
         chunks = [words[i:i + chunk_size] for i in range(0, len(words), chunk_size)]
 
         responses = []
