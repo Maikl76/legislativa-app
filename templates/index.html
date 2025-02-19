@@ -34,6 +34,9 @@
             width: 100%;
             max-width: 600px;
         }
+        #aiAnswer {
+            white-space: pre-wrap; /* ✅ Zajistí formátování AI odpovědi */
+        }
     </style>
 </head>
 <body>
@@ -47,7 +50,7 @@
         <button type="submit">Přidat</button>
     </form>
 
-    <!-- ✅ Tabulka s dokumenty (dynamická podle počtu webů) -->
+    <!-- ✅ Tabulka s dokumenty -->
     <h2>Seznam legislativních dokumentů</h2>
     <table>
         <tr>
@@ -84,7 +87,7 @@
         <button type="submit">Hledat</button>
     </form>
 
-    <!-- ✅ Výsledky hledání vedle tabulky -->
+    <!-- ✅ Výsledky hledání -->
     <div id="searchResults">
         <h3>Výsledky hledání:</h3>
         <ul id="resultsList"></ul>
@@ -136,7 +139,7 @@
             });
         });
 
-        // ✅ Odeslání dotazu na AI
+        // ✅ Odeslání dotazu na AI asistenta
         document.getElementById("askForm").addEventListener("submit", function(event) {
             event.preventDefault();
             let query = document.getElementById("askQuery").value;
@@ -148,7 +151,13 @@
             })
             .then(response => response.json())
             .then(data => {
-                document.getElementById("aiAnswer").innerText = data.answer || "Nepodařilo se získat odpověď.";
+                let answerElement = document.getElementById("aiAnswer");
+                answerElement.innerText = data.answer || "Nepodařilo se získat odpověď.";
+                document.getElementById("aiResponse").style.display = "block";
+            })
+            .catch(error => {
+                console.error("Chyba při získávání odpovědi AI:", error);
+                document.getElementById("aiAnswer").innerText = "❌ Chyba při komunikaci s AI.";
                 document.getElementById("aiResponse").style.display = "block";
             });
         });
