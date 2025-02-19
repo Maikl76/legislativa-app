@@ -29,19 +29,18 @@
         .new { color: green; }
         .updated { color: orange; }
         .unchanged { color: gray; }
+        #searchResults, #aiResults {
+            margin-top: 20px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            display: none;
+        }
         .column-container {
             display: flex;
             gap: 20px;
         }
         .column {
             flex: 1;
-        }
-        .delete-btn {
-            background-color: red;
-            color: white;
-            border: none;
-            padding: 5px;
-            cursor: pointer;
         }
     </style>
 </head>
@@ -50,28 +49,12 @@
     <h1>Seznam legislativních dokumentů</h1>
 
     <!-- Přidání nového zdroje -->
-    <h2>Přidat nový zdroj</h2>
     <form action="/add_source" method="post">
         <input type="text" name="url" placeholder="Vložte URL stránky" required>
         <button type="submit">Přidat zdroj</button>
     </form>
 
-    <!-- Seznam zdrojů s možností odstranění -->
-    <h2>Správa zdrojů</h2>
-    <ul>
-        {% for source in sources %}
-        <li>
-            {{ source }}
-            <form action="/remove_source" method="post" style="display:inline;">
-                <input type="hidden" name="url" value="{{ source }}">
-                <button type="submit" class="delete-btn">🗑</button>
-            </form>
-        </li>
-        {% endfor %}
-    </ul>
-
     <!-- Tabulka dokumentů -->
-    <h2>Seznam dokumentů</h2>
     <table>
         <tr>
             <th>Název dokumentu</th>
@@ -104,7 +87,7 @@
                 </select>
                 <button type="submit">Zeptej se AI</button>
             </form>
-            <div id="aiResults" style="display: none;">
+            <div id="aiResults">
                 <h3>Odpověď AI:</h3>
                 <p id="aiResponse"></p>
             </div>
@@ -117,7 +100,7 @@
                 <input type="text" id="searchQuery" placeholder="Zadejte hledané slovo" required>
                 <button type="submit">Hledat</button>
             </form>
-            <div id="searchResults" style="display: none;">
+            <div id="searchResults">
                 <h3>Výsledky hledání:</h3>
                 <ul id="resultsList"></ul>
             </div>
