@@ -9,3 +9,11 @@ gunicorn
 fpdf
 psutil
 groq
+fastapi
+uvicorn
+pdfplumber
+python-docx
+python-multipart
+jinja2
+sqlite-utils
+sqlalchemy
