@@ -77,48 +77,74 @@ def load_initial_data():
 
 load_initial_data()
 
-# ✅ Funkce pro komunikaci s DeepSeek R1 Distill Qwen-32B
-def ask_groq(question):
-    """ Posílá dotaz na Groq API s modelem DeepSeek R1 Distill Qwen-32B. """
+# ✅ Vrátí seznam dokumentů pro konkrétní webovou stránku
+@app.route('/get_documents', methods=['POST'])
+def get_documents():
+    selected_source = request.form.get("source", "").strip()
+    if not selected_source:
+        return jsonify({"error": "Vyberte webovou stránku."})
+
+    filtered_docs = [doc for doc in legislativa_db.to_dict(orient="records") if doc["Odkaz na zdroj"] == selected_source]
+    
+    return jsonify({"documents": filtered_docs})
+
+# ✅ Funkce pro komunikaci s DeepSeek R1 Distill Qwen-32B (rozdělení textu na části)
+def ask_groq(question, documents):
+    """ Posílá dotaz na Groq API po částech, aby nepřekročil 6000 tokenů. """
     try:
-        # ✅ Použijeme celý text posledních 5 dokumentů
-        extracted_texts = " ".join(legislativa_db["Původní obsah"].tolist()[-5:])
+        # ✅ Spojíme texty vybraných dokumentů
+        full_text = " ".join([doc["Původní obsah"] for doc in documents])
 
-        # ✅ Omezíme vstupní text na max. 25 000 tokenů (pokud model zvládne)
-        words = extracted_texts.split()
-        if len(words) > 25000:
-            truncated_text = " ".join(words[:12500]) + "\n...\n" + " ".join(words[-12500:])
-        else:
-            truncated_text = extracted_texts
+        # ✅ Rozdělíme text na části (max. 6000 tokenů)
+        words = full_text.split()
+        chunk_size = 6000  # Maximální počet tokenů
+        chunks = [words[i:i + chunk_size] for i in range(0, len(words), chunk_size)]
 
-        # ✅ Sestavení promptu
-        prompt = f"Dokumenty:\n{truncated_text}\n\nOtázka: {question}\nOdpověď:"
+        responses = []
 
-        # ✅ Odeslání dotazu do Groq API
-        completion = client.chat.completions.create(
-            model="deepseek-r1-distill-qwen-32b",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.6,
-            max_tokens=4096,  # ✅ Dlouhé odpovědi
-            top_p=0.95,
-            stream=False,
-            stop=None
-        )
+        for i, chunk in enumerate(chunks):
+            truncated_text = " ".join(chunk)
+            prompt = f"Dokumenty (část {i+1}/{len(chunks)}):\n{truncated_text}\n\nOtázka: {question}\nOdpověď:"
 
-        # ✅ Vrácení odpovědi AI
-        return completion.choices[0].message.content.strip()
+            completion = client.chat.completions.create(
+                model="deepseek-r1-distill-qwen-32b",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.6,
+                max_tokens=1024,  # ✅ Každá odpověď max. 1024 tokenů
+                top_p=0.95,
+                stream=False,
+                stop=None
+            )
+
+            responses.append(completion.choices[0].message.content.strip())
+
+        # ✅ Spojíme odpovědi do jedné
+        final_answer = "\n\n".join(responses)
+        return final_answer
 
     except Exception as e:
         logging.error(f"⛔ Chyba při volání Groq API: {e}")
         return f"❌ Chyba při komunikaci s AI: {str(e)}"
 
-# ✅ API endpoint pro dotazy na AI
+# ✅ API endpoint pro AI dotaz (s výběrem webu)
 @app.route('/ask', methods=['POST'])
 def ask():
     question = request.form.get("question", "").strip()
+    selected_source = request.form.get("source", "").strip()
+
     if not question:
         return jsonify({"error": "Zadejte otázku!"})
-    return jsonify({"answer": ask_groq(question)})
+    if not selected_source:
+        return jsonify({"error": "Vyberte webovou stránku!"})
+
+    # ✅ Najdeme dokumenty z vybrané webové stránky
+    selected_docs = [doc for doc in legislativa_db.to_dict(orient="records") if doc["Odkaz na zdroj"] == selected_source]
+
+    if not selected_docs:
+        return jsonify({"error": "Žádné dokumenty nenalezeny pro vybraný zdroj."})
+
+    answer = ask_groq(question, selected_docs)
+    return jsonify({"answer": answer})
 
 # ✅ Hlavní webová stránka
 @app.route('/')
