@@ -8,7 +8,6 @@ from flask import Flask, render_template, request, jsonify, redirect, url_for
 from bs4 import BeautifulSoup
 import fitz  # PyMuPDF
 from dotenv import load_dotenv
-import difflib
 
 # ✅ Načtení environmentálních proměnných
 load_dotenv()
@@ -121,21 +120,23 @@ def ask_groq(question, source):
         "Content-Type": "application/json"
     }
 
-    selected_docs = legislativa_db[legislativa_db["Odkaz na zdroj"] == source]
+    # ✅ Vybrat pouze první 3 dokumenty pro snížení velikosti požadavku
+    selected_docs = legislativa_db[legislativa_db["Odkaz na zdroj"] == source].head(3)
 
     if selected_docs.empty:
         logging.warning("⚠️ Nebyly nalezeny žádné dokumenty pro tento zdroj.")
         return "⚠️ Nebyly nalezeny žádné dokumenty pro tento zdroj."
 
-    extracted_texts = " ".join(selected_docs["Původní obsah"].tolist())
+    # ✅ Zkrácení textu dokumentů na max 1000 znaků
+    extracted_texts = " ".join(selected_docs["Původní obsah"].str[:1000].tolist())
 
     data = {
         "model": "llama3-8b-8192",
         "messages": [
             {"role": "system", "content": "Jsi AI expert na legislativu."},
-            {"role": "user", "content": f"Dokumenty:\n{extracted_texts[:3000]}\n\nOtázka: {question}"}
+            {"role": "user", "content": f"Dokumenty:\n{extracted_texts}\n\nOtázka: {question}"}
         ],
-        "max_tokens": 512
+        "max_tokens": 256  # ✅ Snížení limitu odpovědi
     }
 
     try:
