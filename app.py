@@ -3,14 +3,12 @@ import pandas as pd
 import logging
 import time
 import asyncio
+import re  # ✅ Pro hledání klíčových slov v dokumentu
 from flask import Flask, render_template, request, jsonify
 from bs4 import BeautifulSoup
 import fitz
 from dotenv import load_dotenv
 from groq import Groq
-from sumy.parsers.plaintext import PlaintextParser
-from sumy.nlp.tokenizers import Tokenizer
-from sumy.summarizers.lsa import LsaSummarizer
 
 # ✅ Načtení API klíče
 load_dotenv()
@@ -24,31 +22,50 @@ app.secret_key = "supersecretkey"
 
 logging.basicConfig(level=logging.DEBUG, filename='app.log', filemode='a', format='%(asctime)s - %(levelname)s - %(message)s')
 
-def summarize_text(text, sentences=5):
-    """ Shrne dlouhý text do 5 klíčových vět """
-    parser = PlaintextParser.from_string(text, Tokenizer("english"))
-    summarizer = LsaSummarizer()
-    summary = summarizer(parser.document, sentences)
-    return " ".join([str(sentence) for sentence in summary])
+def extract_relevant_paragraphs(text, query, max_paragraphs=5):
+    """
+    Vyhledá odstavce obsahující klíčová slova dotazu.
+    Pokud žádné nenajde, vrátí první 2-3 nejdelší odstavce.
+    """
+    paragraphs = text.split("\n\n")  # Rozdělení na odstavce
+    keywords = query.lower().split()  # Rozdělení otázky na jednotlivá slova
+
+    relevant_paragraphs = [
+        para for para in paragraphs if any(word in para.lower() for word in keywords)
+    ]
+
+    # Pokud žádný relevantní odstavec nenajdeme, vezmeme nejdelší odstavce
+    if not relevant_paragraphs:
+        relevant_paragraphs = sorted(paragraphs, key=len, reverse=True)[:max_paragraphs]
+
+    return "\n\n".join(relevant_paragraphs[:max_paragraphs])  # Vrátíme maximálně `max_paragraphs` odstavců
 
 async def ask_groq(question, document):
-    """ Pošleme dotaz pouze s relevantními informacemi """
+    """ Pošleme dotaz s pouze relevantními odstavci. """
     text = document["Původní obsah"]
     
-    # ✅ Shrnutí textu před odesláním
-    summarized_text = summarize_text(text, sentences=3) 
+    # ✅ Vyhledáme pouze relevantní odstavce
+    relevant_text = extract_relevant_paragraphs(text, question)
 
-    prompt = f"{summarized_text}\n\n{question}"
+    # ✅ Kontrola délky tokenů před odesláním
+    token_count = len(relevant_text.split()) + len(question.split())
+    print(f"📊 Odesíláme {token_count} tokenů")
     
+    if token_count > 1500:
+        print("⚠️ Text je stále příliš dlouhý, redukujeme ho na 1000 tokenů!")
+        relevant_text = " ".join(relevant_text.split()[:1000])
+
+    prompt = f"{relevant_text}\n\nOtázka: {question}\nOdpověď:"
+
     completion = client.chat.completions.create(
         model="deepseek-r1-distill-qwen-32b",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.6,
-        max_tokens=300,  # ✅ Každá odpověď max. 300 tokenů
+        max_tokens=500,  # ✅ Každá odpověď max. 500 tokenů
         top_p=0.95,
         stream=False
     )
-    
+
     return completion.choices[0].message.content.strip()
 
 @app.route('/ask', methods=['POST'])
